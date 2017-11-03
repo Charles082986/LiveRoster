@@ -25,6 +25,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="LiveRoster.lua" />
+    <Compile Include="LiveRoster2.lua" />
+    <Compile Include="LiveRosterClass.lua" />
+    <Compile Include="LiveRosterErrorHandler.lua" />
+    <Compile Include="LiveRosterFrames.lua" />
+    <Compile Include="LiveRosterSettings.lua" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="LiveRoster.toc" />
