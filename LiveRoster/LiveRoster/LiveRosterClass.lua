@@ -1,57 +1,56 @@
 LiveRoster = {
     PlayerCharacters = {},
-    Players = {},
-    ExtensionButtons = {
-        Main = nil
-    },
-    Roster = {
-        MainCharacters = {},
-        AlternateCharacters = {},
-        Unknown = {},
-        NameIndex = {},
-        Promotions = {},
-    },
-    MostAlts = 0,
-    OutputChannel = "SAY",
-    Promotions = {
-        Selected = 0,
-        Enabled = 0,
-        Completed = 0,
-        Total = 0,
-    },
-    SelectedPlayer = nil,
-    SelectedPlayerCharacterIndex = 0,
-    ShortNames = {},
-    GuildCount = 1,
-	CanRemove = nil,
+    CanRemove = nil,
 	CanPromote = nil,
 	CanInvite = nil,
 	CanDemote = nil,
-	MyRankIndex = 99
+	MyGuildRankIndex = 99,
+	Frame = {},
 }
 LiveRoster.__index = LiveRoster;
 
 function LiveRoster:create ()
     local lr = {};
     setmetatable (lr, LiveRoster);
-    if LR_USE_SNAPSHOT > 0 and LR_SNAPSHOT ~= nil and InAltGuild () then
-        local guildCount = 1;
-        LRE ("Snapshot Found, using.")
-        for sName, vMain in pairs (LR_SNAPSHOT.PlayerCharacters) do
-            LR_SNAPSHOT_INDEX[guildCount] = sName;
-            guildCount = guildCount + 1;
-        end
-        lr.GuildCount = guildCount;
-		lr.CanRemove = CanGuildRemove();
-		lr.CanPromote = CanGuildPromote();
-		lr.CanInvite = CanGuildInvite();
-		lr.CanDemote = CanGuildDemote();
-    end
+	lr.CanRemove = CanGuildRemove();
+	lr.CanPromote = CanGuildPromote();
+	lr.CanInvite = CanGuildInvite();
+	lr.CanDemote = CanGuildDemote();
+	lr.Frame = LiveRosterFrame;
     return lr;
+end
+
+function LiveRoster.RegisterEvents()
+	local frame = self.Frame;
+	local function OnEvent(self,event,...)
+		if event=="ADDON_LOADED" and select(1,...)=="LiveRoster" then
+			self:UnregisterEvent("ADDON_LOADED")
+			GuildRosterFrame:HookScript("OnShow",self.GuildRosterFrame_Show);
+			GuildRosterFrame:HookScript("OnHide",self.GuildRosterFrame_Hide);
+		  elseif event=="PLAYER_LOGIN" then
+			if IsAddOnLoaded("LiveRoster") then
+			  OnEvent(self,"ADDON_LOADED","LiveRoster");
+			else
+			  self:RegisterEvent("ADDON_LOADED");
+			end
+		  end
+		end
+	end
+	frame:SetScript("OnEvent", OnEvent);
+	frame:RegisterEvent("PLAYER_LOGIN");
+end
+
+function LiveRoster.GuildRosterFrame_Show(me)
+	print("The Guild Roster Frame is Now Showing.");
+end
+
+function LiveRoster.GuildRosterFrame_Hide(me)
+	print("The Guild Roster Frame is Now Hidden.");
 end
 
 function LiveRoster.LoadFullRoster()
 	self:PrepareRoster();
+	local altStore = {};
 	local localInsert = table.insert;
 	local localCount = table.getn;
 	local guildSize = GetNumGuildMembers();
@@ -59,23 +58,21 @@ function LiveRoster.LoadFullRoster()
 		local playerCharacter = LiveRosterPlayerCharacter:create(i,GetGuildRosterInfo(i));
 		local mainName, isAlt = LiveRoster_ParseGuildNote(playerCharacter);
 		playerCharacter.IsAlternateCharacter = isAlt;
-		local characterAltStore = self.AltStore[mainName];
+		local characterAltStore = altStore[mainName];
 		if not characterAltStore then characterAltStore = LiveRosterAltStore:create(); end
 		localInsert(characterAltStore,playerCharacter.Name);
 		if not not isAlt then
 			playerCharacter.MainName = mainName;
 		end
-		self.AltStore[mainName] = characterAltStore;
+		altStore[mainName] = characterAltStore;
 		self.PlayerCharacters[playerCharacter.Name] = playerCharacter;
 		self.NameIndex[i] = playerCharacter.Name;
 	end
-	local altStore = self.AltStore;
 	for k,v in pairs(altStore) do
 		for a,b in pairs(v) do
 			self.PlayerCharacters[b].AlternateCharacters = v;
 		end
 	end
-	self.AltStore = nil;
 end
 
 function LiveRoster:PrepareRoster()
@@ -200,4 +197,17 @@ function LiveRosterPlayerCharacter:create(iIndex,sName,sRank,iRankIndex,iLevel,s
 	lrpc.IsAlternateCharacter = bIsAlt;
 	lrpc.MainName = sMainName;
 	return lrpc;
+end
+
+LiveRosterEventHandler = {
+	Events = {};
+}
+
+function LiveRosterEventHandler:create()
+	local lreh = {};
+	setmetatable(lreh,LiveRosterEventHandler);
+	lreh.Events = {
+
+	}
+	return lreh;
 end
