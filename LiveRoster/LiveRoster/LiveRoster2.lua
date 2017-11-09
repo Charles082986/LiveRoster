@@ -2,9 +2,8 @@ FrameXML_Debug (enable);
 
 LR_NAME = "LiveRoster";
 LR_VERSION = 2.0;
-
 LR_SETTINGS = LR_SETTINGS or LiveRosterSettings:create();
-LR_GUILDDATA = LR_GUILDDATA or {};
+LR_GUILDDATA = LR_GUILDDATA or LiveRosterGuildData:create();
 
 LR = LiveRoster:create();
 LR.RegisterEvents();
@@ -102,12 +101,15 @@ function LiveRoster_PrioritySort(a,b)
 	end
 end
 
-function LiveRoster_ConcurrencySort(a,b)
-	local da = a.Concurrency_OriginDate or 0;
-	local db = b.Concurrency_OriginDate or 0;
-	if da ~= db then
-		return da > db;
+function LiveRoster_CheckReplaceItem(localItem,remoteItem)
+	local l = localItem.Concurrency_OriginDate or 0;
+	local r = remoteItem.Concurrency_OriginDate or 0;
+	if r == l then 
+		return false;
+	elseif r < l then 
+		return false; 
 	else
-		return a > b;
+		return true;
 	end
+	return false;
 end

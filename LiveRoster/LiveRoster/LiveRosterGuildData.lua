@@ -13,6 +13,21 @@ function LiveRosterGuildData:create()
 	return lrgd;
 end
 
+function LiveRosterGuildData.GetStoredRosterItem(name)
+	return self.Roster[name];
+end
+
+function LiveRosterGuildData.SaveRosterItem(itemToSave,storedItem)
+	if not not storedItem then
+		for k,v in itemToSave do
+			storedItem[k] = v;
+		end
+		self.Roster[storedItem.Name] = storedItem;
+	else
+		self.Roster[itemToSave.Name] = itemToSave;
+	end
+end
+
 LiveRosterGuildDataRosterItem = {
 	Name = nil,
 	InvitedBy = nil,
