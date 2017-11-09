@@ -5,6 +5,8 @@ LiveRoster = {
 	CanInvite = nil,
 	CanDemote = nil,
 	MyGuildRankIndex = 99,
+	MyName = nil,
+	MyGuildName = nil,
 	Frame = {},
 }
 LiveRoster.__index = LiveRoster;
@@ -12,32 +14,45 @@ LiveRoster.__index = LiveRoster;
 function LiveRoster:create ()
     local lr = {};
     setmetatable (lr, LiveRoster);
-	lr.CanRemove = CanGuildRemove();
-	lr.CanPromote = CanGuildPromote();
-	lr.CanInvite = CanGuildInvite();
-	lr.CanDemote = CanGuildDemote();
+	lr.CanRemove = LiveRoster_CanGuildRemove();
+	lr.CanPromote = LiveRoster_CanGuildPromote();
+	lr.CanInvite = LiveRoster_CanGuildInvite();
+	lr.CanDemote = LiveRoster_CanGuildDemote();
 	lr.Frame = LiveRosterFrame;
+	local guildName,guildRankName,guildRankIndex = GetGuildInfo("player");
+	lr.MyGuildName = guildName;
+	lr.MyGuildRankIndex = guildRankIndex;
+	lr.MyName = UnitName("player");
     return lr;
+end
+
+function LiveRoster.OnEvent(me,event,...)
+	if event=="ADDON_LOADED" and select(1,...)==LR_NAME then
+		self.Frame:UnregisterEvent("ADDON_LOADED")
+		GuildRosterFrame:HookScript("OnShow",self.GuildRosterFrame_Show);
+		GuildRosterFrame:HookScript("OnHide",self.GuildRosterFrame_Hide);
+	elseif event == "CHAT_MSG_ADDON" then
+		local prefix = select(1,...);
+		local message = select(2,...);
+		local channel = select(3,...);
+		local sender = select(4,...);
+		local messageKey = string.sub(message,1,1);
+		local messageHasData,messageData = pcall(string.sub(message,3));
+		LiveRoster_ReceivedMessageHandler(prefix,message,channel,sender,messageKey,messageHasData,messageData);
+	elseif event=="PLAYER_LOGIN" then
+		if IsAddOnLoaded(LR_NAME) then
+			OnEvent(me,"ADDON_LOADED",LR_NAME);
+		else
+			self.Frame:RegisterEvent("ADDON_LOADED");
+		end
+	end
 end
 
 function LiveRoster.RegisterEvents()
 	local frame = self.Frame;
-	local function OnEvent(self,event,...)
-		if event=="ADDON_LOADED" and select(1,...)=="LiveRoster" then
-			self:UnregisterEvent("ADDON_LOADED")
-			GuildRosterFrame:HookScript("OnShow",self.GuildRosterFrame_Show);
-			GuildRosterFrame:HookScript("OnHide",self.GuildRosterFrame_Hide);
-		  elseif event=="PLAYER_LOGIN" then
-			if IsAddOnLoaded("LiveRoster") then
-			  OnEvent(self,"ADDON_LOADED","LiveRoster");
-			else
-			  self:RegisterEvent("ADDON_LOADED");
-			end
-		  end
-		end
-	end
-	frame:SetScript("OnEvent", OnEvent);
+	frame:SetScript("OnEvent", LiveRoster_OnEvent);
 	frame:RegisterEvent("PLAYER_LOGIN");
+	frame:RegisterEvent("CHAT_MSG_ADDON");
 end
 
 function LiveRoster.GuildRosterFrame_Show(me)
@@ -53,6 +68,7 @@ function LiveRoster.LoadFullRoster()
 	local altStore = {};
 	local localInsert = table.insert;
 	local localCount = table.getn;
+	local localSort = table.sort;
 	local guildSize = GetNumGuildMembers();
 	for i = 1, guildSize do
 		local playerCharacter = LiveRosterPlayerCharacter:create(i,GetGuildRosterInfo(i));
@@ -60,7 +76,7 @@ function LiveRoster.LoadFullRoster()
 		playerCharacter.IsAlternateCharacter = isAlt;
 		local characterAltStore = altStore[mainName];
 		if not characterAltStore then characterAltStore = LiveRosterAltStore:create(); end
-		localInsert(characterAltStore,playerCharacter.Name);
+		localInsert(characterAltStore,playerCharacter);
 		if not not isAlt then
 			playerCharacter.MainName = mainName;
 		end
@@ -69,9 +85,21 @@ function LiveRoster.LoadFullRoster()
 		self.NameIndex[i] = playerCharacter.Name;
 	end
 	for k,v in pairs(altStore) do
-		for a,b in pairs(v) do
-			self.PlayerCharacters[b].AlternateCharacters = v;
+		local specificAltStore = v;
+		localSort(specificAltStore,LiveRoster_PrioritySort);
+		local count = 0;
+		local priorityCharacter;
+		for k2,v2 in pairs(specificAltStore) do
+			if not priorityCharacter then
+				priorityCharacter = v2;
+				priorityCharacter.OnlinePriorityCharacter = {};
+			elseif not not v2.Online then
+				localInsert(priorityCharacter.OnlineSubordinateCharacters,v2);
+			else
+				localInsert(priorityCharacter.OfflineSubordinateCharacters,v2);
+			end
 		end
+		localInsert(self.PriorityCharacters,priorityCharacter);
 	end
 end
 
@@ -89,24 +117,30 @@ function LiveRoster.RemoveMember(iIndex)
 	if not not self.CanRemove then
 		local playerCharacter = self.PlayerCharacters[self.NameIndex[iIndex]];
 		for k,v in pairs(playerCharacter.AlternateCharacters) do
-			GuildUninvite(v);
+			local success = pcall(GuildUninvite(v));
+			if not success then false; end
 		end
 	end
+	return true;
 end
 
 function LiveRoster.SetMemberRank(iIndex,iTargetRankIndex)
 	local playerCharacter = self.PlayerCharacters[self.NameIndex[iIndex]];
-	self.SyncGuildRanks(iIndex);
-	if iTargetRankIndex > self.MyGuildRankIndex and playerCharacter.RankIndex > self.MyGuildRankIndex 
-		and ((iTargetRankIndex < playerCharacter.RankIndex and self.CanPromote) 
-		or (iTargetRankIndex > playerCharacter.RankIndex and self.CanDemote)) then
-		for k,v in pairs(playerCharacter.AlternateCharacters) do
-			local promoteCharacter = self.PlayerCharacters[v];
+	for k,v in pairs(playerCharacter.AlternateCharacters) do
+		local promoteCharacter = self.PlayerCharacters[v];
+		if iTargetRankIndex > self.MyGuildRankIndex and promoteCharacter.RankIndex > self.MyGuildRankIndex 
+			and ((iTargetRankIndex < promoteCharacter.RankIndex and self.CanPromote) 
+			or (iTargetRankIndex > promoteCharacter.RankIndex and self.CanDemote)) then
 			if not not iTargetRank then 
-				SetGuildMemberRank(promoteCharacter.Index,iTargetRank);
+				local success = pcall(SetGuildMemberRank(promoteCharacter.Index,iTargetRank));
+				if not success then return false; end
 			end 
 		end
 	end
+	return true;
+end
+
+function LiveRoster.InviteAlternateCharacter(mainName, characterName)
 end
 
 LiveRosterAltStore = {
@@ -151,7 +185,9 @@ function LiveRosterDismissal:create (characterName)
 end
 
 LiveRosterPlayerCharacter = {
-	Name = nil, 
+	FullName = nil,
+	ShortName = nil,
+	GuildContextName = nil,
 	Rank = nil, 
 	Index = 0, 
 	RankIndex = 0, 
@@ -160,11 +196,8 @@ LiveRosterPlayerCharacter = {
 	Zone = nil,
 	Note = nil,
 	OfficerNote = nil,
-	DaysInGuild = 0,
-	ErrorStatus = 0,
-	NeedsPromotion = 0,
-	ShortName = nil,
 	Online = 0,
+	Status = nil;
 	ClassFileName = nil,
 	AchievementPoints = 0,
 	AchievementRank = 0,
@@ -172,14 +205,17 @@ LiveRosterPlayerCharacter = {
 	CanSoR = false,
 	Reputation = 0,
 	IsAlternateCharacter = nil,
-	MainName = nil;
-	Alts = {}
+	MainName = nil,
+	OnlineSubordinateCharacters = {},
+	OfflineSubordinateCharacters = {},
 }
 
-function LiveRosterPlayerCharacter:create(iIndex,sName,sRank,iRankIndex,iLevel,sClass,sZone,sNote,sOfficerNote,bOnline,sClassFileName,iAchievementPoints,iAchievementRank,bIsMobile,bCanSoR,iReputation,bIsAlt,sMainName)
+function LiveRosterPlayerCharacter:create(iIndex,sFullName,sRank,iRankIndex,iLevel,sClass,sZone,sNote,sOfficerNote,bOnline,sStatus,sClassFileName,iAchievementPoints,iAchievementRank,bIsMobile,bCanSoR,iReputation,bIsAlt,sMainName)
 	local lrpc = {};
 	setmetatable(lrpc,LiveRosterPlayerCharacter);
-	lrpc.Name = sName;
+	lrpc.FullName = sFullName;
+	lrpc.ShortName = Ambiguate(sFullName,"short");
+	lrpc.GuildContextName = Ambiguate(sFullName,"guild");
 	lrpc.Rank = sRank;
 	lrpc.Index = iIndex;
 	lrpc.RankIndex = iRankIndex;
@@ -188,6 +224,7 @@ function LiveRosterPlayerCharacter:create(iIndex,sName,sRank,iRankIndex,iLevel,s
 	lrpc.Note = sNote;
 	lrpc.OfficerNote = sOfficerNote;
 	lrpc.Online = bOnline;
+	lrpc.Status = sStatus;
 	lrpc.ClassFileName = sClassFileName;
 	lrpc.AchievementPoints = iAchievementPoints;
 	lrpc.AchievementRank = iAchievementRank;

@@ -1,26 +1,33 @@
-LIVEROSTER_RANK_COLORS = {
-    "FFFF0000"
-    , "FFFF8000"
-    , "FFFFD700"
-    , "FFFFD700"
-    , "FFa335EE"
-    , "FF0070DD"
-    , "FF1EFF00"
-    , "FFFFFFFF"
-    , "FF9D9D9D"
+LiveRosterSettings = {
+	RankColors = {},
+	ClassColors = {}
 }
 
-LIVEROSTER_CLASS_COLORS = {};
-LIVEROSTER_CLASS_COLORS["Death Knight"] = "FFC41F3B";
-LIVEROSTER_CLASS_COLORS["Demon Hunter"] = "FFA335EE";
-LIVEROSTER_CLASS_COLORS["Druid"] = "FFFF7D0A";
-LIVEROSTER_CLASS_COLORS["Hunter"] = "FFABD473";
-LIVEROSTER_CLASS_COLORS["Mage"] = "FF69CCF0";
-LIVEROSTER_CLASS_COLORS["Monk"] = "FF00FF96";
-LIVEROSTER_CLASS_COLORS["Paladin"] = "FFF58CBA";
-LIVEROSTER_CLASS_COLORS["Priest"] = "FFFFFFFF";
-LIVEROSTER_CLASS_COLORS["Rogue"] = "FFFFF569";
-LIVEROSTER_CLASS_COLORS["Shaman"] = "FF0070DE";
-LIVEROSTER_CLASS_COLORS["Warlock"] = "FF9482C9";
-LIVEROSTER_CLASS_COLORS["Warrior"] = "FFC79C6E";
-
+function LiveRosterSettings:create()
+	lrs = {};
+	setmetatable(lrs,LiveRosterSettings);
+	lrs.RankColors = {
+		"FFFF0000"
+		, "FFFF8000"
+		, "FFFFD700"
+		, "FFFFD700"
+		, "FFa335EE"
+		, "FF0070DD"
+		, "FF1EFF00"
+		, "FFFFFFFF"
+		, "FF9D9D9D"
+	},
+	lrs["Death Knight"] = "FFC41F3B";
+	lrs["Demon Hunter"] = "FFA335EE";
+	lrs["Druid"] = "FFFF7D0A";
+	lrs["Hunter"] = "FFABD473";
+	lrs["Mage"] = "FF69CCF0";
+	lrs["Monk"] = "FF00FF96";
+	lrs["Paladin"] = "FFF58CBA";
+	lrs["Priest"] = "FFFFFFFF";
+	lrs["Rogue"] = "FFFFF569";
+	lrs["Shaman"] = "FF0070DE";
+	lrs["Warlock"] = "FF9482C9";
+	lrs["Warrior"] = "FFC79C6E";
+	return lrs;
+end
