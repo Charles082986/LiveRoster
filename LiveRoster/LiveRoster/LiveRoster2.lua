@@ -57,8 +57,12 @@ function LiveRoster:new()
 				O = "Originated"
 			},
 			InvertedVolatileCharacterData = {},
-		}
+		},
+		RosterFrameData = { -- Amalgamated data from CharacterData, CharacterData2, VolatileCharacterData, and PlayerAlternateCharacters.
+			
+		},
 	};
+	self.Classes = {};
 	self.Communication = {
 		TimeOutDuration = 5; -- The number of seconds to wait for a response before handling the timeout function.
 		DataItemSeparator = ";";
@@ -144,7 +148,7 @@ function LiveRoster.addFunctions(self)
 		return me;
 	end
 	self.ValidateInternalStorage = function(self) -- Validates internal storage of local guild members, dumping all records of players that no longer appear in the roster.
-		
+		local x = true;
 	end;
 	self.BeginVersionCheck = function(self) -- Checks version upon login.
 		SendAddonMessage(self.Communication.Prefix,self.Communication.Mappers.InvertedMessageKeys["VersionCheck"]..LR_VERSION,"GUILD");
@@ -153,17 +157,113 @@ function LiveRoster.addFunctions(self)
 		SendAddonMessage(self.Communication.Prefix,self.Communication.Mappers.InvertedMessageKeys["VersionCheckResponse"]..LR_VERSION,"WHISPER",sender);
 		self.CheckVersionAgainstIncoming(version);
 	end
-	self.HandleVersionCheckResponse = function(self,sender,version) -- Handles responses to a VersionCheck.
-		self.CheckVersionAgainstIncoming(version);
+	self.HandleVersionCheckResponse = function(self,sender,version,minimumVersion) -- Handles responses to a VersionCheck.
+		self.CheckVersionAgainstIncoming(version,minimumVersion);
 		table.insert(self.LiveRosterPenetration.CharactersWithLiveRoster,sender);
 	end
-	self.CheckVersionAgainstIncoming = function(version) -- Checks local version against incoming versions.
+	self.CheckVersionAgainstIncoming = function(self,version,minimumVersion) -- Checks local version against incoming versions.
 		if self.LatestVersionSeen < version and LR_VERSION < version then
 			self.LatestVersionSeen = version;
-			DEFAULT_CHAT_FRAME:AddMessage(self.Logging.DisplayLogPrefix.." You're version of LiveRoster is out of date.  Please update to the latest version: "..version..".");
+			self.LogMessage("Your version of LiveRoster is out of date.  Please update to version "..version..".");
+			if LR_VERSION < minimumVersion then
+				self.LogMessage("Your version of LiveRoster predates the minimum supported version.  Communication has been disabled.  Please update LiveRoster as soon as possible.");
+				self.CommunicationEnabled = false;
+			end
+		end
+	end
+	self.LogMessage = function(self,message)  -- Logs a message to the default chat frame.
+		DEFAULT_CHAT_FRAME:AddMessage(self.Logging.DisplayLogPrefix..message); 
+	end
+	self.GetRosterItemLevel = function(item) -- Gets the highest item level for a character.
+		if not item.Spec1 then item.Spec1 = -1; end
+		if not item.Spec2 then item.Spec2 = -1; end
+		if not item.Spec3 then item.Spec3 = -1; end
+		if not item.Spec4 then item.Spec4 = -1; end
+		return math.max(item.Spec1,item.Spec2,item.Spec3,item.Spec4);
+	end
+	self.GetFilteredRoster = function(self,filterObject,sortObject) -- Returns the filtered and sorted roster to the UI.
+		-- FilterObject: { Name:"", Death Knight: true, Demon Hunter: true, Druid: true, Hunter: true, Mage: true, Monk: true, Paladin: true, Priest: true
+		--				, Rogue: true, Shaman: true, Warlock: true, Warrior: true, Tank: true, Melee: true, Ranged: true, Healer: true
+		--				, Item Level: 900, Mythic Plus: 13, Raid Kills: 7, AOTC: true, Cutting Edge: true }
+		local containsName = filterObject["Name"];
+		local isTank = not not filterObject["Tank"];
+		local isMelee = not not filterObject["Melee"];
+		local isRanged = not not filterObject["Ranged"];
+		local isHealer = not not filterObject["Healer"];
+		local minItemLevel = filterObject["Item Level"];
+		local mythicPlus = filterObject["Mythic Plus"];
+		local raidProgression = filterObject["Raid Kills"];
+		local hasAOTC = not not filterObject["AOTC"];
+		local hasCE = not not filterObject["Cutting Edge"];
+		local localsort = table.sort;
+		for k,v in pairs(self.Roster.RosterFrameData) do
+			if self:FilterRosterItem(v,containsName,filterObject,isTank,isMelee,isRanged,isHealer,minItemLevel,mythicPlus,raidProgression,hasAOTC,hasCE) then 
+				localInsert(output,result);
+			end
+		end
+		self.SortObject = sortObject or {};
+		return localsort(output,LR_ROSTERSORT);
+	end
+	self.ValidateRoleAndILvl = function(self,tank,healer,ranged,melee,rosterDataItem,itemLevelFilter) -- Validates role and item level for the filtering function.
+		for index,value in ipairs(self.Classes[class].Specs)
+			if ((tank and value.Role == "Tank") or (healer and value.Role == "Healer") or (melee and value.Role == "Melee") or (ranged and value.Role == "Ranged")) and rosterDataItem["Spec"..index] >= itemLevelFilter then
+					return true;
+			end
+		end
+		return false;
+	end
+	self.GetHighestMythicPlusCompleted = function(self,rosterDataItem) -- Returns the highest completed mythic plus dungeon.
+		local output = 0;
+		for k,v in pairs(rosterDataItem.MythicPlusDungeons) do
+			if output < v then output = v;
+		end
+		return output;
+	end
+	self.GetLatestRaidTierKills = function(self,rosterDataItem,difficulty) -- Returns the number of bosses down in the latest raid tier.
+		local output = 0;
+		local localLength = table.getn;
+		for k,v in pairs(rosterDataItem.RaidProgress[self.LatestRaid])
+			if v[difficulty] > 0 then output = output + 1;
+		end
+		return output;
+	end
+	self.FilterRosterItem = function(self,rosterDataItem,filterObject,name,isTank,isMelee,isRanged,isHealer,minItemLevel,mythicPlus,raidProgression,hasAOTC,hasCE)  -- Compares the roster item to the filter parameters to determine if the roster item should be passed back to the UI.
+		local output = {};
+		local localInsert = table.insert;
+		local localFind = string.find;	
+		local class = rosterDataItem["Class"];
+		minItemLevel = minItemLevel or 0;
+		if not filterObject[class] then return false;
+		elseif (not isHealer and not isTank and not isMelee and not isRanged) then return false;
+		elseif not self:ValidateRoleAndILvl(isTank,isHealer,isRanged,isMelee,rosterDataItem,minItemLevel) then return false;
+		elseif not not mythicPlus and self:GetHighestMythicPlusCompleted(rosterDataItem) < mythicPlus then return false;
+		elseif not not raidProgression and self:GetLatestRaidTierKills(rosterDataItem,raidProgression.Difficulty) < raidProgression.Progress then return false;
+		elseif not not hasAOTC and not rosterDataItem.RaidProgress[self.LatestRaid].AOTC then return false;
+		elseif not not hasCE and not rosterDataItem.RaidProgress[self.LatestRaid].CuttingEdge then return false;
+		elseif not not name and not localFind(rosterDataItem["ShortName"],name) then return false;
+		else return true;
 		end
 	end
 end
+
+LR_ROSTERSORT = function(a,b)
+	sort = LiRos.SortObject;
+	if not sort or sort == {} then 
+		LiRos.SortObject = {};
+		LiRos.SortObject[1] = { Name = "Online", Inverted = false };
+		LiRos.SortObject[2] = { Name = "FullName", Inverted = false };
+		sort = LiRos.SortObject;
+	end
+	for index,value in ipairs(sort) do
+		local n = value[Name];
+		local aVal = a[n], bVal = b[n];
+		if aVal ~= bVal then 
+			if value[Inverted] then return aVal < bVal; else return aVal > bVal; end
+		end
+	end
+	return a["FullName"] > b["FullName"];
+end
+
 function LiveRoster.Update(self) -- Insert code here to ensure LiveRoster object settings are updated when new versions are released.
 	if self.Version < LR_MINIMUM_VERSION then
 		local invertKeys = function(collection)
@@ -177,6 +277,35 @@ function LiveRoster.Update(self) -- Insert code here to ensure LiveRoster object
 		self.Roster.Mappers.InvertedCharacterData = invertKeys(self.Roster.Mappers.CharacterData);
 		self.Roster.Mappers.InvertedCharacterData2 = invertKeys(self.Roster.Mappers.CharacterData2);
 		self.Roster.Mappers.InvertedVolatileCharacterData = invertKeys(self.Roster.Mappers.VolatileCharacterData);
+		local addClass = function(armor, spec1Name,spec1Role,spec1Stat,spec2Name,spec2Role,spec2Stat,spec3Name,spec3Role,spec3Stat,spec4Name,spec4Role,spec4Stat)
+			local me = { Armor = armor, Specs = {} };
+			me.Specs[1] = { Name = spec1Name, Role = spec1Role, Stat = spec1Stat };
+			me.Specs[2] = { Name = spec2Name, Role = spec2Role, Stat = spec2Stat };
+			if not not spec3Name then
+				me.Specs[3] = { Name = spec3Name, Role = spec3Role, Stat = spec3Stat };
+			end
+			if not not spec4Name then
+				me.Specs[4] = { Name = spec4Name, Role = spec4Role, Stat = spec4Stat };
+			end
+			return me;
+		end
+		self.Classes["Death Knight"] = addClass("Plate","Blood","Tank","Strength","Frost","Melee","Strength","Unholy","Melee","Strength");
+		self.Classes["Demon Hunter"] = addClass("Leather","Havoc", "Melee", "Agility", "Vengeance","Tank","Agility");
+		self.Classes["Druid"] = addClass("Leather","Balance","Ranged","Intellect","Feral","Melee","Agility","Guardian","Tank","Agility","Restoration","Heal","Intellect");
+		self.Classes["Hunter"] = addClass("Mail","Beast Mastery","Ranged","Agility","Marksmanship","Ranged","Agility","Survival","Melee","Agility");
+		self.Classes["Mage"] = addClass("Cloth","Arcane","Ranged","Intellect","Fire","Ranged","Intellect","Frost","Ranged","Intellect");
+		self.Classes["Monk"] = addClass("Leather","Brewmaster","Tank","Agility","Mistweaver","Healer","Intellect","Windwalker","Melee","Agility");
+		self.Classes["Paladin"] = addClass("Plate","Holy","Heal","Intellect","Protection","Tank","Strength","Retribution","Melee","Strength");
+		self.Classes["Priest"] = addClass("Cloth","Discipline","Heal","Intellect","Holy","Heal","Intellect","Shadow","Ranged","Intellect");
+		self.Classes["Rogue"] = addClass("Leather","Assassination","Melee","Agility","Outlaw","Melee","Agility","Subtlety","Melee","Agility");
+		self.Classes["Shaman"] = addClass("Mail","Elemental","Ranged","Intellect","Enhancement","Melee","Agility","Restoration","Heal","Intellect");
+		self.Classes["Warlock"] = addClass("Cloth","Affliction","Ranged","Intellect","Demonology","Ranged","Intellect","Destruction","Ranged","Intellect");
+		self.Classes["Warrior"] = addClass("Plate","Arms","Melee","Strength","Fury","Melee","Strength","Protection","Tank","Strength");
+		self.Healers = { "Druid", "Monk", "Paladin","Priest","Shaman"};
+		self.Tanks = { "Death Knight", "Demon Hunter", "Druid", "Monk", "Paladin", "Warrior" };
+		self.Melee = { "Death Knight", "Demon Hunter", "Druid", "Hunter", "Monk", "Paladin", "Rogue", "Shaman", "Warrior" };
+		self.Ranged = { "Druid", "Hunter", "Mage", "Priest", "Shaman", "Warlock"};
+		self.MythicPlusDungeons = { "Black Rook Hold", "Cathedral of Eternal Night", "Court of Stars", "Darkheart Thicket", "Eye of Azshara", "Halls of Valor", "Maw of Souls", "Neltharion's Lair", "The Arcway", "Vaul tof the Wardens", "Lower Karazhan", "Upper Karazhan", "Seat of the Triumverate" };
 		self.Version = LR_VERSION;
 	end
 end
@@ -184,3 +313,4 @@ end
 LiRos = LiRos or LiveRoster:new();
 LiRos:addFunctions();
 LiRos:Update();
+LiRos.CommunicationEnabled = true;
