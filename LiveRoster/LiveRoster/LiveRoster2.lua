@@ -13,6 +13,8 @@ function LiveRoster:new()
 		CharacterData2 = { -- Data that should rarely change, or that may change frequently until it reaches a cap (Level, Reputation, etc).  The records are automatically rebuilt every time the player logs in.
 		}
 		VolatileCharacterData = { -- Data that changes frequently.  The records are automatically rebuilt every time the roster opens.  While awaiting responses, the character's roster record is bordered in red.
+			SpecInfo = {},
+			GuildRosterInfo = {}
 		};
 		PlayerAlternateCharacters = { -- A list of alternate characters for each main character.  These records are rebuilt whenever the associated CharacterData record is rebuilt.
 		};
@@ -42,19 +44,21 @@ function LiveRoster:new()
 				O = "Originated"
 			},
 			InvertedCharacterData2 = {},
-			VolatileCharacterData = {
+			GuildRosterRecord = {
+				O = "Originated",
 				z = "Zone",
 				n = "Note",
 				o = "OfficerNote",
 				a = "Online",
 				s = "Status",
-				m = "IsMobile",
+				m = "IsMobile"
+			},
+			SpecInformation = {
+				O = "Originated",
 				b = "Spec1",
 				f = "Spec2",
 				g = "Spec3",
-				r = "Spec4",
-				i = "Index",
-				O = "Originated"
+				r = "Spec4",	
 			},
 			InvertedVolatileCharacterData = {},
 		},
@@ -84,6 +88,10 @@ function LiveRoster:new()
 				l = "SpeakerHandoffAccept", -- This message is accepting the role of Speaker.
 				m = "SpeakerHandoffDecline", -- This message is declining to accept the role of Speaker.
 				n = "VersionCheckResponse" -- Response to VersionCheck.
+				o = "GuildRosterRecord" -- Contains GuildRosterRecord.
+				p = "GuildRosterRecordRequest" -- Requests GuildRosterRecord for a character.
+				q = "SpecRecord" -- Contains information about a unit's spec and item level.
+				r = "SpecRecordRequest" -- Requests spec data for a unit.
 			}
 			InvertedMessageKeys = {};
 		}
@@ -276,7 +284,8 @@ function LiveRoster.Update(self) -- Insert code here to ensure LiveRoster object
 		self.Communciation.Mappers.InvertedMessageKeys = invertKeys(self.Communication.Mappers.MessageKeys);
 		self.Roster.Mappers.InvertedCharacterData = invertKeys(self.Roster.Mappers.CharacterData);
 		self.Roster.Mappers.InvertedCharacterData2 = invertKeys(self.Roster.Mappers.CharacterData2);
-		self.Roster.Mappers.InvertedVolatileCharacterData = invertKeys(self.Roster.Mappers.VolatileCharacterData);
+		self.Roster.Mappers.InvertedGuildRosterRecord = invertKeys(self.Roster.Mappers.GuildRosterRecord);
+		self.Roster.Mappers.InvertedSpecInformation = invertKeys(self.Roster.Mappers.SpecInformation);
 		local addClass = function(armor, spec1Name,spec1Role,spec1Stat,spec2Name,spec2Role,spec2Stat,spec3Name,spec3Role,spec3Stat,spec4Name,spec4Role,spec4Stat)
 			local me = { Armor = armor, Specs = {} };
 			me.Specs[1] = { Name = spec1Name, Role = spec1Role, Stat = spec1Stat };
@@ -313,4 +322,5 @@ end
 LiRos = LiRos or LiveRoster:new();
 LiRos:addFunctions();
 LiRos:Update();
+LiRos.Update = nil;
 LiRos.CommunicationEnabled = true;
