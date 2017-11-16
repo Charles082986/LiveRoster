@@ -220,17 +220,17 @@ function LiveRoster.addFunctions(self)
 		end
 		return false;
 	end
-	self.GetHighestMythicPlusCompleted = function(self,rosterDataItem) -- Returns the highest completed mythic plus dungeon.
+	self.GetHighestMythicPlusCompleted = function(self,mythicDungeonsRecord) -- Returns the highest completed mythic plus dungeon.
 		local output = 0;
-		for k,v in pairs(rosterDataItem.MythicPlusDungeons) do
+		for k,v in pairs(mythicDungeonsRecord.DungeonProgress) do
 			if output < v then output = v;
 		end
 		return output;
 	end
-	self.GetLatestRaidTierKills = function(self,rosterDataItem,difficulty) -- Returns the number of bosses down in the latest raid tier.
+	self.GetLatestRaidTierKills = function(self,raidProgress,difficulty) -- Returns the number of bosses down in the latest raid tier.
 		local output = 0;
 		local localLength = table.getn;
-		for k,v in pairs(rosterDataItem.RaidProgress[self.LatestRaid])
+		for k,v in pairs(raidProgress)
 			if v[difficulty] > 0 then output = output + 1;
 		end
 		return output;
@@ -252,6 +252,132 @@ function LiveRoster.addFunctions(self)
 		else return true;
 		end
 	end
+	self.CreateRosterFrameData = function(self,name,characterData,characterData2,volatileCharacterData)
+		local specInfo = volatileCharacterData.SpecInformation;
+		local rosterData = volatileCharacterData.GuildRosterData;
+		local output = {
+			Name = name,
+			Class = characterData.Class,
+			Level = characterData.Level,
+			Zone = rosterData.Zone,
+			Spec1 = specInfo.Spec1.Value,
+			Spec2 = specInfo.Spec2.Value,
+			ILvl = self:GetRosterItemLevel(specInfo),
+			Tank = self:GetRosterItemLevel(specInfo,"Tank"),
+			Healer = self:GetRosterItemLevel(specInfo,"Healer"),
+			Melee = self:GetRosterItemLevel(specInfo,"Melee"),
+			Ranged = self:GetRosterItemLevel(specInfo,"Ranged"),
+			Raid = self:GetLatestRaidTierKills(volatileCharacterData.RaidProgress[self.LatestRaid]),
+			RankIndex = characterData2.RankIndex,
+			Rank = characterData2.Rank,
+			Guild = characterData.Guild
+		};
+		if not not specInfo.Spec3 then 
+			output["Spec3"] = specInfo.Spec3.Value;
+			if not not specInfo.Spec3 then 
+				output["Spec4"] = specInfo.Spec3.Value; 
+			end
+		end
+		output["M+"] = self:GetHighestMythicPlusCompleted(volatileCharacterData.MythicDungeons);
+		return output;
+	end
+	self.UpdateVolatileRosterFrameData = function(self,rosterFrameData,volatileCharacterData)
+		local specInfo = volatileCharacterData.SpecInformation;
+		local rosterData = volatileCharacterData.GuildRosterData;
+		rosterFrameData.Zone = rosterData.Zone,
+		rosterFrameData.Spec1 = specInfo.Spec1.Value,
+		rosterFrameData.Spec2 = specInfo.Spec2.Value,
+		rosterFrameData.ILvl = self:GetRosterItemLevel(specInfo);
+		rosterFrameData.Tank = self:GetRosterItemLevel(specInfo,"Tank");
+		rosterFrameData.Healer = self:GetRosterItemLevel(specInfo,"Healer");
+		rosterFrameData.Melee = self:GetRosterItemLevel(specInfo,"Melee");
+		rosterFrameData.Ranged = self:GetRosterItemLevel(specInfo,"Ranged");
+		rosterFrameData.["M+"] = self:GetHighestMythicPlusCompleted(volatileCharacterData.MythicDungeons);
+		rosterFrameData.Raid = self:GetLatestRaidTierKills(volatileCharacterData.RaidProgress[self.LatestRaid]);
+		return rosterFrameData;
+	end
+	self.GetDetailedCharacterData = function(self,characterData,characterData2,volatileCharacterData)
+		local class = characterData.Class;
+		local output = {
+			FullName = characterData.FullName,
+			Class = class,
+			Specs = {},
+			RaidProgress = {},
+			MythicPlus = {},
+			PvP = {},
+			PetBattles = {},
+			Alts = {}
+		};
+		for index,value in ipairs(self.Classes[class].Specs) do
+			output.Specs[index] = {
+				Name = value.Name,
+				Role = value.Role,
+				SpecIcon = "",
+				RoleIcon = "",
+				ItemLevel = volatileCharacterData.SpecInformation[index]
+			};
+		end
+		local progress = volaitleCharacterData.RaidProgress;
+		for index,value in ipairs(self.Raids) do
+			output.RaidProgress[value.Name] = {
+				Normal = self:GetRaidKills(progress,value.Name,"Normal").."/"..value.NormalBossCount;
+				Heroic = self:GetRaidKills(progress,value.Name,"Heroic").."/"..value.HeroicBossCount;
+				Mythic = self:GetRaidKills(progress,value.Name,"Mythic").."/"..value.MythicBossCount;
+				HasAOTC = not not progress.AOTC[value.Name];
+				HasCE = not not progress.CuttingEdge[value.Name];
+			}
+		end
+		local dungeonProgress = volatileCharacterData.MythicDungeons.DungeonProgress;
+		for index,value in ipairs(self.MythicDungeons) do
+			if not not dugeonProgress[value.Name] then
+				output.MythicDungeons.DungeonProgress[value.Name] = dungeonProgress[value.Name].HighestCompleted;
+			else
+				output.MythicDungeons.DungeonProgress[value.Name] = 0;
+			end
+		end
+		output.MythicDungeons.Keystone = volatileCharacterData.MythicDungeons.Keystone;
+		output.PetBattles["PvP Wins"] = volatileCharacterData.PetBattleInfo.PvPWins;
+		output.PetBattles["Pets Collected"] = volatileCharacterData.PetsCollected;
+		local pvp = volatileCharacterData.PvPStatistics or {};
+		local arenas = {};
+		for index,value in ipairs(self.Arenas) do
+			local stats = pvp[value.."v"..value];
+			local arena = { Wins = 0, Played = 0, WinRatio = "0%" };
+			if not not stats then
+				arena = { Wins = stats.Wins or 0, Played = stats.Played or 0, WinRatio = "0%" };
+				if arena.Played ~= 0 then
+					arena.WinRatio = LR_ROUNDING(arena.Wins / arena.Played,2).."%";
+				end
+			end
+			arenas[value.."v"..value] = arena;
+		end
+		local bgs = {};
+		for index,value in ipairs(self.Battlegrounds) do
+			local stats = pvp[value];
+			local bg = { Wins = 0, Played = 0, WinRatio = "0%" };
+			local ratedbg = { Wins = 0, Played = 0, WinRatio = "0%" };
+			if not not stats then
+				bg = { Wins = stats.Wins, Played = stats.Played, WinRatio = "0%" };
+				ratedbg = { Wins = stats.RatedWins, Played = stats.RatedPlayed, WinRatio = "0%" };
+				if bg.Played ~= 0 then
+					bg.WinRatio = LR_ROUNDING(bg.RatedWins / bg.RatedPlayed,2).."%";
+				end
+			end
+			bgs[value] = bg;
+			bgs["Rated "..value] = ratedbg;
+		end
+		output.PvP = { Arenas = arenas, Battlegrounds = bgs };
+		local alts = {};
+		local mainName = characterData2.MainName;
+		if not characterDat2.IsAlternateCharacter then 
+			alts = { self:CreateAltCard(mainName) };
+		end
+		for index,value in ipairs(self.Roster.CharacterData2[mainName].Alts) do
+			table.insert(alts,self:CreateAltCard(value))
+		end
+		output.Alts = alts;
+		return output;
+	end
 end
 
 LR_ROSTERSORT = function(a,b)
@@ -270,6 +396,11 @@ LR_ROSTERSORT = function(a,b)
 		end
 	end
 	return a["FullName"] > b["FullName"];
+end
+
+LR_ROUNDING = function(num,decimalPlaces)
+	local mult = 10^(decimalPlaces or 0);
+	return math.floor(num * mult) / mult;
 end
 
 function LiveRoster.Update(self) -- Insert code here to ensure LiveRoster object settings are updated when new versions are released.
