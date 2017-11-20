@@ -6,18 +6,22 @@ function LiveRoster:new()
 	self.Version = 0;
 	self.LatestVersionSeen = 0;
 	self.Roster = {
-		IndexCollection = { -- Collection of names and indexes for the player's local guild.  Updates every time the roster is opened.
-		};
-		CharacterData = { -- Data that should reasonably never change.  Check for new entries when the player logs on.  The records are automatically rebuilt once per month, and can be manually rebuilt using a FullGuildSyncRequest.
-		};
+		IndexCollection = { -- Name <-> Index Relationship for currently open roster frame.  Rebuilt every time the roster is opened.
+		},
+		CharacterData = { -- Data that should reasonably never change.  Check for new entries when the player logs on.  The records are automatically rebuilt once per month, and can be manually rebuilt using a FullGuildSyncRequest.  
+		},
 		CharacterData2 = { -- Data that should rarely change, or that may change frequently until it reaches a cap (Level, Reputation, etc).  The records are automatically rebuilt every time the player logs in.
-		}
-		VolatileCharacterData = { -- Data that changes frequently.  The records are automatically rebuilt every time the roster opens.  While awaiting responses, the character's roster record is bordered in red.
-			SpecInfo = {},
-			GuildRosterInfo = {}
-		};
-		PlayerAlternateCharacters = { -- A list of alternate characters for each main character.  These records are rebuilt whenever the associated CharacterData record is rebuilt.
-		};
+		},
+		GuildRosterRecord = { -- Guild Roster Data that changes frequently.  The records are updated every hour while the player is not in combat, or when the player logs in.
+		},
+		SpecInformation = { -- Data about a character's spec-specific item level.  The records are updated every time the player logs in.
+		},
+		RaidProgress = { -- Data about a character's raid progress.  The records are updated every time the player logs in.  Addon users will broadcast a record update when they down a new raid boss.
+		},
+		MythicDungeons = { -- Data about a character's Mythic Plus Dungeon Progress.  The records are updated every time the player logs in. Addon users will broadcast a record update when they achieve a new personal best.
+		},
+		PlayerAlternateCharacters = { -- A list of alternate characters for each main character.  These records are rebuilt whenever the associated CharacterData record is rebuilt.  Addon users will broadcast an update when they join a guild linked with the guild another one of their characters is in.
+		},
 		Mappers = {
 			CharacterData = {
 				f = "FullName",
@@ -55,11 +59,10 @@ function LiveRoster:new()
 			},
 			SpecInformation = {
 				O = "Originated",
-				b = "Spec1",
-				f = "Spec2",
-				g = "Spec3",
-				r = "Spec4",	
+				n = "SpecName",
+				i = "ItemLevel"
 			},
+			
 			InvertedVolatileCharacterData = {},
 		},
 		RosterFrameData = { -- Amalgamated data from CharacterData, CharacterData2, VolatileCharacterData, and PlayerAlternateCharacters.
@@ -73,13 +76,13 @@ function LiveRoster:new()
 		KeyValueSeparator = ",";
 		Prefix = "LIVEROSTER";
 		Mappers = {
-			MessageKeys = {
+			MessageKeys = { --abcdnoqst
 				a = "CharacterData", -- This message contains a CharacterData object.
 				b = "CharacterData2", -- This message contains a CharacterData2 object.
 				c = "VolatileCharacterData", -- This message contains a VolatileCharacterData object.
 				d = "AlternateCharacters", -- This message contains an alternate character object.
-				e = "VersionCheck", -- This message is requesting the current version of the Player's LiveRoster addon.
-				f = "SpeakerCheck", -- This message is requesting the current Speaker for the Player's guild.
+				e = "VersionCheckRequest", -- This message is requesting the current version of the Player's LiveRoster addon.
+				f = "SpeakerCheckRequest", -- This message is requesting the current Speaker for the Player's guild.
 				g = "SpeakerHandoffRequest", -- This message is requesting the Player's addon take over the role of Speaker.
 				h = "CharacterDataRequest", -- This message is requesting the CharacterData object for a given Character.
 				i = "CharacterData2Request", -- This message is requesting the CharacterData2 object for a given Character.
@@ -87,11 +90,15 @@ function LiveRoster:new()
 				k = "FullGuildSyncRequest", -- This message is requesting a full sync of the Player's guild.
 				l = "SpeakerHandoffAccept", -- This message is accepting the role of Speaker.
 				m = "SpeakerHandoffDecline", -- This message is declining to accept the role of Speaker.
-				n = "VersionCheckResponse" -- Response to VersionCheck.
+				n = "VersionCheck" -- Response to VersionCheck.
 				o = "GuildRosterRecord" -- Contains GuildRosterRecord.
 				p = "GuildRosterRecordRequest" -- Requests GuildRosterRecord for a character.
 				q = "SpecRecord" -- Contains information about a unit's spec and item level.
 				r = "SpecRecordRequest" -- Requests spec data for a unit.
+				s = "MythicPlusDungeonRecord" -- Contains data on a player's progress in a specific Mythic Plus Dungeon.
+				r = "MythicPlusDungeonRecordRequest" -- Request for data on a player's progress in a specific Mythic Plus Dungeon.
+				t = "RaidProgressRecord" -- Contains data on a player's progress ina  specific Raid.
+				u = "RaidProgressRecordRequest" -- Requests data on a player's progress in a specific Raid.
 			}
 			InvertedMessageKeys = {};
 		}
@@ -182,12 +189,17 @@ function LiveRoster.addFunctions(self)
 	self.LogMessage = function(self,message)  -- Logs a message to the default chat frame.
 		DEFAULT_CHAT_FRAME:AddMessage(self.Logging.DisplayLogPrefix..message); 
 	end
-	self.GetRosterItemLevel = function(item) -- Gets the highest item level for a character.
-		if not item.Spec1 then item.Spec1 = -1; end
-		if not item.Spec2 then item.Spec2 = -1; end
-		if not item.Spec3 then item.Spec3 = -1; end
-		if not item.Spec4 then item.Spec4 = -1; end
-		return math.max(item.Spec1,item.Spec2,item.Spec3,item.Spec4);
+	self.GetRosterItemLevel = function(characterSpecInfo,classObject,role) -- Gets the highest item level for a character.
+		local iLvl = 0;
+		for specIndex = 1,4 do
+			specInfo = characterSpecInfo[specIndex];
+			if not specInfo then specInfo = { ItemLevel = -1 }; 
+			local specIlvl = specInfo.Ilvl;			
+			if not role or (role == classObject.Specs[specIndex].Role) then
+				if iLvl < specIlvl then iLvl = specIlvl;
+			end
+		end
+		return iLvl;
 	end
 	self.GetFilteredRoster = function(self,filterObject,sortObject) -- Returns the filtered and sorted roster to the UI.
 		-- FilterObject: { Name:"", Death Knight: true, Demon Hunter: true, Druid: true, Hunter: true, Mage: true, Monk: true, Paladin: true, Priest: true
@@ -255,18 +267,20 @@ function LiveRoster.addFunctions(self)
 	self.CreateRosterFrameData = function(self,name,characterData,characterData2,volatileCharacterData)
 		local specInfo = volatileCharacterData.SpecInformation;
 		local rosterData = volatileCharacterData.GuildRosterData;
+		local class = characterData.Class;
+		local classObject = self.Classes[class];
 		local output = {
 			Name = name,
-			Class = characterData.Class,
+			Class = class,
 			Level = characterData.Level,
 			Zone = rosterData.Zone,
 			Spec1 = specInfo.Spec1.Value,
 			Spec2 = specInfo.Spec2.Value,
 			ILvl = self:GetRosterItemLevel(specInfo),
-			Tank = self:GetRosterItemLevel(specInfo,"Tank"),
-			Healer = self:GetRosterItemLevel(specInfo,"Healer"),
-			Melee = self:GetRosterItemLevel(specInfo,"Melee"),
-			Ranged = self:GetRosterItemLevel(specInfo,"Ranged"),
+			Tank = self:GetRosterItemLevel(specInfo,classObject,"Tank"),
+			Healer = self:GetRosterItemLevel(specInfo,classObject,"Healer"),
+			Melee = self:GetRosterItemLevel(specInfo,classObject,"Melee"),
+			Ranged = self:GetRosterItemLevel(specInfo,classObject,"Ranged"),
 			Raid = self:GetLatestRaidTierKills(volatileCharacterData.RaidProgress[self.LatestRaid]),
 			RankIndex = characterData2.RankIndex,
 			Rank = characterData2.Rank,
@@ -378,6 +392,92 @@ function LiveRoster.addFunctions(self)
 		output.Alts = alts;
 		return output;
 	end
+	self.BuildRosterFrameData = function(self)
+		for k,v in pairs(self.CharacterData) do
+			local volatileCharacterData = self.VolatileCharacterData[k] or self:EmptyVolatileCharacterData();
+			local characterData2 = self.CharacterData2[k] or self:EmptyCharacterData2()
+		end
+	end
+	self.EmptyVolatileCharacterData = function(self) -- Empty VolatileCharacterData object for displaying placeholder data on the frame.
+	end
+	self.EmptyCharacterData2 = function(self) -- Empty CharacterData2 object for displaying placeholder data on the frame.
+	end
+	self.BuildRaidRoster = function(self)
+		local groupSize = GetNumGroupMembers();
+		self.GroupRoster = {};
+		for idx = 1,groupSize do
+			name, rank, subgroup, level, class, fileName, zone, online, isDead, role, isML = GetRaidRosterInfo(idx);
+			self.GroupRoster[idx] = { Name = name };
+		end
+	end
+	self.HandleCombatEnd = function(self)
+		if not not self.CurrentEncounter then
+			self:SendEncounterRecord();
+			self.CombatEvent = nil;
+		end
+	end
+	self.HandleCombatStart = function(self)
+		
+	end
+	self.HandleMessage = function(self,messageKey,sender,message,channel)
+		local messageType = self.Communication.Mappers.MessageKeys[messageKey];
+		local rosterItem = self:ParseMessageToRosterItem(messageType,message);
+		local isRoster,_ =  "abcdnoqst":find(messageKey); -- Concatenated string of message keys, checking to see if message key exists.  Faster than loop.
+		if not not isRoster then
+			local saved,update = self:TrySaveRosterItem(messageType,rosterItem);
+			local updateAsMessage = self:ParseRosterItemToMessage(messageType,rosterItem);
+			if not saved and not not update then
+				if not self.IsSpeaker then
+					SendAddonMessage(self.Communication.Prefix,messageType..updateAsMessage,"WHISPER",sender);
+				else
+					SendAddonMessage(self.Communication.Prefix,messageType..updateAsMessage,"GUILD");
+				end
+			end
+		else
+			-- Message was not a roster item.  What now?
+		end
+	end
+	self.AddToPendingMessages = function(messageKey,sender,message,channel)
+		self.PendingMessages = self.PendingMessages or {};
+		self.PendingMessages[#self.PendingMessages+1] = { Key = messageKey, Sender = sender, Message = message, Channel = channel };
+	end
+	self.HandlePendingMessages = function()
+		for index,value in ipairs(self.PendingMessages) do
+			self:HandleMessage(value.Key,value.Sender,value.Message,value.Channel);
+		end
+	end
+end
+
+function LiveRoster.RegisterEvents(self)
+	local frame = CreateFrame('LiveRosterFrame_EMPTY');
+	frame:RegisterEvent("GROUP_ROSTER_UPDATE");
+	frame:RegisterEvent("PLAYER_REGEN_DISABLED");
+	frame:RegisterEvent("PLAYER_REGEN_ENABLED");
+	frame:RegisterEvent("CHAT_MSG_ADDON")
+	frame:SetScript("OnEvent", function(self, event, ...)
+		if event == "PLAYER_REGEN_ENABLED" then
+			LiRos.InCombat = false;
+			LiRos:HandleCombatEnd();
+			LiRos:ProcessPendingMessages();
+		elseif event == "PLAYER_REGEN_DISABLED" then
+			LiRos.InCombat = true;
+			LiRos:HandleCombatStart();
+		elseif event == "CHAT_MSG_ADDON" then 
+			--("prefix", "message", "channel", "sender")
+			local message = select(2,...);
+			local channel = select(3,...);
+			local sender = select(4,...);
+			local messageKey = string.sub(message,1,1);
+			message = string.sub(message,2);
+			if LiRos:InCombat == false then
+				LiRos:HandleMessage(messageKey,sender,message,channel);
+			else
+				LiRos:AddToPendingMessages(messageKey,sender,message,channel);
+			end
+		elseif event == "GROUP_ROSTER_UPDATE"
+			LiRos:BuildRaidRoster();
+		end
+	end)
 end
 
 LR_ROSTERSORT = function(a,b)
