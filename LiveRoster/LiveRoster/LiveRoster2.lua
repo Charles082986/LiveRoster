@@ -18,7 +18,7 @@ function LiveRoster:new()
 		},
 		RaidProgress = { -- Data about a character's raid progress.  The records are updated every time the player logs in.  Addon users will broadcast a record update when they down a new raid boss.
 		},
-		MythicDungeons = { -- Data about a character's Mythic Plus Dungeon Progress.  The records are updated every time the player logs in. Addon users will broadcast a record update when they achieve a new personal best.
+		DungeonProgress = { -- Data about a character's Mythic Plus Dungeon Progress.  The records are updated every time the player logs in. Addon users will broadcast a record update when they achieve a new personal best.
 		},
 		PlayerAlternateCharacters = { -- A list of alternate characters for each main character.  These records are rebuilt whenever the associated CharacterData record is rebuilt.  Addon users will broadcast an update when they join a guild linked with the guild another one of their characters is in.
 		},
@@ -57,13 +57,21 @@ function LiveRoster:new()
 				s = "Status",
 				m = "IsMobile"
 			},
+			InvertedGuildRosterRecord = {},
 			SpecInformation = {
 				O = "Originated",
 				n = "SpecName",
-				i = "ItemLevel"
+				i = "ItemLevel",
+				p = "Name",
 			},
+			InvertedSpecInformation = {},
+			RaidProgressRecord = {
+				O = "Originated",
+				i = "InstanceName",
+				b = "BossName",
+				d = "Difficulty"
+			}
 			
-			InvertedVolatileCharacterData = {},
 		},
 		RosterFrameData = { -- Amalgamated data from CharacterData, CharacterData2, VolatileCharacterData, and PlayerAlternateCharacters.
 			
@@ -264,61 +272,26 @@ function LiveRoster.addFunctions(self)
 		else return true;
 		end
 	end
-	self.CreateRosterFrameData = function(self,name,characterData,characterData2,volatileCharacterData)
-		local specInfo = volatileCharacterData.SpecInformation;
-		local rosterData = volatileCharacterData.GuildRosterData;
-		local class = characterData.Class;
-		local classObject = self.Classes[class];
+	self.GetDetailedCharacterData = function(self,name)
+		local data = self.Roster.CharacterData[name];
+		local data2 = self.Roster.CharacterData2[name];
+		local guild = self.Roster.GuildRoster[name];
+		local raids = self.Roster.RaidProgress[name];
+		local dungeons = self.Roster.DungeonProgress[name];
+		local arenas = self.Roster.Arenas[name];
+		local battlegrounds = self.Roster.Battlegrounds[name];
+		local petBattles = self.Roster.PetBattles[name];
+		local specs = self.Roster.Specs[name];
+		local alts = self.Roster.AlternateCharacters[name];
+		local class = data.Class;
 		local output = {
-			Name = name,
-			Class = class,
-			Level = characterData.Level,
-			Zone = rosterData.Zone,
-			Spec1 = specInfo.Spec1.Value,
-			Spec2 = specInfo.Spec2.Value,
-			ILvl = self:GetRosterItemLevel(specInfo),
-			Tank = self:GetRosterItemLevel(specInfo,classObject,"Tank"),
-			Healer = self:GetRosterItemLevel(specInfo,classObject,"Healer"),
-			Melee = self:GetRosterItemLevel(specInfo,classObject,"Melee"),
-			Ranged = self:GetRosterItemLevel(specInfo,classObject,"Ranged"),
-			Raid = self:GetLatestRaidTierKills(volatileCharacterData.RaidProgress[self.LatestRaid]),
-			RankIndex = characterData2.RankIndex,
-			Rank = characterData2.Rank,
-			Guild = characterData.Guild
-		};
-		if not not specInfo.Spec3 then 
-			output["Spec3"] = specInfo.Spec3.Value;
-			if not not specInfo.Spec3 then 
-				output["Spec4"] = specInfo.Spec3.Value; 
-			end
-		end
-		output["M+"] = self:GetHighestMythicPlusCompleted(volatileCharacterData.MythicDungeons);
-		return output;
-	end
-	self.UpdateVolatileRosterFrameData = function(self,rosterFrameData,volatileCharacterData)
-		local specInfo = volatileCharacterData.SpecInformation;
-		local rosterData = volatileCharacterData.GuildRosterData;
-		rosterFrameData.Zone = rosterData.Zone,
-		rosterFrameData.Spec1 = specInfo.Spec1.Value,
-		rosterFrameData.Spec2 = specInfo.Spec2.Value,
-		rosterFrameData.ILvl = self:GetRosterItemLevel(specInfo);
-		rosterFrameData.Tank = self:GetRosterItemLevel(specInfo,"Tank");
-		rosterFrameData.Healer = self:GetRosterItemLevel(specInfo,"Healer");
-		rosterFrameData.Melee = self:GetRosterItemLevel(specInfo,"Melee");
-		rosterFrameData.Ranged = self:GetRosterItemLevel(specInfo,"Ranged");
-		rosterFrameData.["M+"] = self:GetHighestMythicPlusCompleted(volatileCharacterData.MythicDungeons);
-		rosterFrameData.Raid = self:GetLatestRaidTierKills(volatileCharacterData.RaidProgress[self.LatestRaid]);
-		return rosterFrameData;
-	end
-	self.GetDetailedCharacterData = function(self,characterData,characterData2,volatileCharacterData)
-		local class = characterData.Class;
-		local output = {
-			FullName = characterData.FullName,
+			FullName = data.FullName,
 			Class = class,
 			Specs = {},
 			RaidProgress = {},
 			MythicPlus = {},
-			PvP = {},
+			Arenas = {},
+			Battlegrounds = {},
 			PetBattles = {},
 			Alts = {}
 		};
@@ -328,12 +301,11 @@ function LiveRoster.addFunctions(self)
 				Role = value.Role,
 				SpecIcon = "",
 				RoleIcon = "",
-				ItemLevel = volatileCharacterData.SpecInformation[index]
+				ItemLevel = specs[index].Value;
 			};
 		end
-		local progress = volaitleCharacterData.RaidProgress;
 		for index,value in ipairs(self.Raids) do
-			output.RaidProgress[value.Name] = {
+			raids[value.Name] = {
 				Normal = self:GetRaidKills(progress,value.Name,"Normal").."/"..value.NormalBossCount;
 				Heroic = self:GetRaidKills(progress,value.Name,"Heroic").."/"..value.HeroicBossCount;
 				Mythic = self:GetRaidKills(progress,value.Name,"Mythic").."/"..value.MythicBossCount;
@@ -341,21 +313,19 @@ function LiveRoster.addFunctions(self)
 				HasCE = not not progress.CuttingEdge[value.Name];
 			}
 		end
-		local dungeonProgress = volatileCharacterData.MythicDungeons.DungeonProgress;
 		for index,value in ipairs(self.MythicDungeons) do
-			if not not dugeonProgress[value.Name] then
+			if not not dungeons[value.Name] then
 				output.MythicDungeons.DungeonProgress[value.Name] = dungeonProgress[value.Name].HighestCompleted;
 			else
 				output.MythicDungeons.DungeonProgress[value.Name] = 0;
 			end
 		end
-		output.MythicDungeons.Keystone = volatileCharacterData.MythicDungeons.Keystone;
-		output.PetBattles["PvP Wins"] = volatileCharacterData.PetBattleInfo.PvPWins;
-		output.PetBattles["Pets Collected"] = volatileCharacterData.PetsCollected;
-		local pvp = volatileCharacterData.PvPStatistics or {};
-		local arenas = {};
+		output.MythicDungeons.Keystone = dungeons.Keystone;
+		output.PetBattles["PvP Wins"] = petBattles.PvPWins;
+		output.PetBattles["Pets Collected"] = petBattles.PetsCollected;
+		output.Arenas = {};
 		for index,value in ipairs(self.Arenas) do
-			local stats = pvp[value.."v"..value];
+			local stats = arenas[value];
 			local arena = { Wins = 0, Played = 0, WinRatio = "0%" };
 			if not not stats then
 				arena = { Wins = stats.Wins or 0, Played = stats.Played or 0, WinRatio = "0%" };
@@ -363,11 +333,12 @@ function LiveRoster.addFunctions(self)
 					arena.WinRatio = LR_ROUNDING(arena.Wins / arena.Played,2).."%";
 				end
 			end
-			arenas[value.."v"..value] = arena;
+			output.Arenas[value] = arena;
 		end
-		local bgs = {};
+		output.Battlegrounds = {};
+		output.RatedBattlegrounds = {};
 		for index,value in ipairs(self.Battlegrounds) do
-			local stats = pvp[value];
+			local stats = battlegrounds[value];
 			local bg = { Wins = 0, Played = 0, WinRatio = "0%" };
 			local ratedbg = { Wins = 0, Played = 0, WinRatio = "0%" };
 			if not not stats then
@@ -377,32 +348,77 @@ function LiveRoster.addFunctions(self)
 					bg.WinRatio = LR_ROUNDING(bg.RatedWins / bg.RatedPlayed,2).."%";
 				end
 			end
-			bgs[value] = bg;
-			bgs["Rated "..value] = ratedbg;
+			output.Battlegrounds[value] = bg;
+			output.RatedBattlegrounds[value] = ratedbg;
 		end
-		output.PvP = { Arenas = arenas, Battlegrounds = bgs };
 		local alts = {};
-		local mainName = characterData2.MainName;
-		if not characterDat2.IsAlternateCharacter then 
+		local mainName = data2.MainName;
+		if data2.IsAlternateCharacter then 
 			alts = { self:CreateAltCard(mainName) };
 		end
 		for index,value in ipairs(self.Roster.CharacterData2[mainName].Alts) do
-			table.insert(alts,self:CreateAltCard(value))
+			if value ~= name then
+				table.insert(alts,self:CreateAltCard(value));
+			end
 		end
-		output.Alts = alts;
+		output.AltCards = alts;
 		return output;
 	end
-	self.BuildRosterFrameData = function(self)
+	self.BuildRosterFrameData = function(self) -- Run every time roster is opened.
+		local rosterFrameData = {};
+		local characterData = self.Roster.CharacterData;
+		local characterData2 = self.Roster.CharacterData2;
+		local raidProgress = self.Roster.RaidProgress;
+		local guildRoster = self.Roster.GuildRoster;
+		local dungeonProgress = self.Roster.DungeonProgress;
+		local specInformation = self.Roster.SpecInformation;
+		local arenas = self.Roster.Arenas;
+		local battlegrounds = self.Roster.Battlegrounds;
+		local petBattles = self.Roster.PetBattles;
 		for k,v in pairs(self.CharacterData) do
-			local volatileCharacterData = self.VolatileCharacterData[k] or self:EmptyVolatileCharacterData();
-			local characterData2 = self.CharacterData2[k] or self:EmptyCharacterData2()
+			local raid = raidProgress[k] or self:EmptyRaidProgress();
+			local data2 = characterData2[k] or self:EmptyCharacterData2();
+			local guild = guildRoster[k] or self:EmptyGuildRoster();
+			local dungeon = dungeonProgress[k] or self:EmptyDungeonProgress();
+			local specs = self:SanitizeSpecInformation(specInformation[k]);
+			local arena = arenas[k] or self:EmptyArena();
+			local battleground = battleground[k] or self:EmptyBattleground();
+			local petBattle = petBattles[k] or self:EmptyPetBattle();
+			local output = {
+				Name = k,
+				Class = v.Class,
+				Level = data2.Level,
+				Zone = guild.Zone,
+				Spec1 = specs.Spec1.Value,
+				Spec2 = specs.Spec2.Value,
+				ILvl = self:GetRosterItemLevel(specs),
+				Tank = self:GetRosterItemLevel(specs,classObject,"Tank"),
+				Healer = self:GetRosterItemLevel(specs,classObject,"Healer"),
+				Melee = self:GetRosterItemLevel(specs,classObject,"Melee"),
+				Ranged = self:GetRosterItemLevel(specs,classObject,"Ranged"),
+				Raid = self:GetLatestRaidTierKills(raid[self.LatestRaid]),
+				RankIndex = data2.RankIndex,
+				Rank = data2.Rank,
+				Guild = v.Guild
+			};
+			if specs.Spec3.Value > -1 then 
+				output["Spec3"] = specs.Spec3.Value;
+				if specs.Spec4.Value > -1 then 
+					output["Spec4"] = specs.Spec4.Value; 
+				end
+			end
+			output["M+"] = self:GetHighestMythicPlusCompleted(dungeonProgress);
+			output["2v2"] = self:FormatArenaData("2v2",arena);
+			output["3v3"] = self:FormatArenaData("3v3",arena);
+			output["5v5"] = self:FormatArenaData("5v5",arena);
+			output["BGs"] = self:FormatBattlegroundData("All",battleground);
+			output["RBGs"] = self:FormatBattlegroundData("Rated",battleground);
+			rosterFrameData[k] = output;
 		end
-	end
-	self.EmptyVolatileCharacterData = function(self) -- Empty VolatileCharacterData object for displaying placeholder data on the frame.
 	end
 	self.EmptyCharacterData2 = function(self) -- Empty CharacterData2 object for displaying placeholder data on the frame.
 	end
-	self.BuildRaidRoster = function(self)
+	self.BuildGroupRoster = function(self)
 		local groupSize = GetNumGroupMembers();
 		self.GroupRoster = {};
 		for idx = 1,groupSize do
@@ -411,30 +427,72 @@ function LiveRoster.addFunctions(self)
 		end
 	end
 	self.HandleCombatEnd = function(self)
-		if not not self.CurrentEncounter then
-			self:SendEncounterRecord();
-			self.CombatEvent = nil;
+		self.CommunicationEnabled == true;
+		if not not self.CombatEncounter then
+			local encounter = self.CombatEncounter;
+			local zone = self.Zone;
+			if zone.Type == "Raid" then
+				local newBossKill = not self.RaidProgression[zone.Name][zone.Difficulty][encounter.Name];
+				if newBossKill then
+					local record = {
+						Originated = time(),
+						zoneName = zone.Name,
+						Difficulty = zone.Difficulty,
+						BossName = encounter.Name
+					}
+					SendAddonMessage(self.Communication.Prefix,self.Communication.Mappers.InvertedMessageKeys["RaidProgressRecord"]..self:ParseObjectToMessage(self.Roster.Mappers["RaidProgressRecord"]),"GUILD")
+				end
+			elseif zone.Type == "Dungeon" then
+
+			elseif zone.Type == "PvP" then
+			
+			else
+
+			end
 		end
+		self.CombatEncounter = nil;
 	end
 	self.HandleCombatStart = function(self)
-		
+		local ecnounters = self.Zone.Encounters;
+		self.CommunicationEnabled == false;
+		if self.Zone.Type ~= "PvP" then
+			local boss = UnitName("boss1");
+			local encounter = encounters[UnitName("boss1") or "NO_UNIT"];
+			if not boss then
+				for index,value in ipairs(self.GroupRoster) do
+					local targetName = UnitName(value.Name);
+					encounter = encounters[UnitName(value.Name) or "NO_UNIT"];
+					if not not encounter then break;
+				end
+			end
+			if not not encounter then self.CombatEncounter = encounter; end
+		end
 	end
 	self.HandleMessage = function(self,messageKey,sender,message,channel)
 		local messageType = self.Communication.Mappers.MessageKeys[messageKey];
-		local rosterItem = self:ParseMessageToRosterItem(messageType,message);
+		local rosterItem = self:ParseMessage(messageType,message);
 		local isRoster,_ =  "abcdnoqst":find(messageKey); -- Concatenated string of message keys, checking to see if message key exists.  Faster than loop.
 		if not not isRoster then
 			local saved,update = self:TrySaveRosterItem(messageType,rosterItem);
 			local updateAsMessage = self:ParseRosterItemToMessage(messageType,rosterItem);
 			if not saved and not not update then
 				if not self.IsSpeaker then
-					SendAddonMessage(self.Communication.Prefix,messageType..updateAsMessage,"WHISPER",sender);
+					SendAddonMessage(self.Communication.Prefix,self.Communication.Mappers.InvertedMessageKeys[messageType]..updateAsMessage,"WHISPER",sender);
 				else
-					SendAddonMessage(self.Communication.Prefix,messageType..updateAsMessage,"GUILD");
+					SendAddonMessage(self.Communication.Prefix,self.Communication.Mappers.InvertedMessageKeys[messageType]..updateAsMessage,"GUILD");
 				end
 			end
 		else
-			-- Message was not a roster item.  What now?
+			isRequest,_ = messageType:find("Request");
+			if not not isRequest then
+				local rosterType = messageType:sub("Request","");
+				local request = self:ParseMessage(messageType,message)
+				local responseObject = self.Roster[rosterType][request.Name];
+				local responseMessage = self:ParseObjectToMessage(rosterType,responseObject);
+				SendAddonMessage(self.Communciation.Prefix,self.Communication.Mappers.InvertedMessageKeys[rosterType]..responseMessage,"WHISPER",sender);
+			else
+				self:LogMessage(messageType.." has no handler attached.");
+			end
 		end
 	end
 	self.AddToPendingMessages = function(messageKey,sender,message,channel)
@@ -463,13 +521,12 @@ function LiveRoster.RegisterEvents(self)
 			LiRos.InCombat = true;
 			LiRos:HandleCombatStart();
 		elseif event == "CHAT_MSG_ADDON" then 
-			--("prefix", "message", "channel", "sender")
 			local message = select(2,...);
 			local channel = select(3,...);
 			local sender = select(4,...);
 			local messageKey = string.sub(message,1,1);
 			message = string.sub(message,2);
-			if LiRos:InCombat == false then
+			if not not LiRos.CommunicationEnabled then
 				LiRos:HandleMessage(messageKey,sender,message,channel);
 			else
 				LiRos:AddToPendingMessages(messageKey,sender,message,channel);
