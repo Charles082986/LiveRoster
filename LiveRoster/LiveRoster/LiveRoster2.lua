@@ -1,81 +1,13 @@
 LiveRoster = {};
 LR_VERSION = 1;
 LR_MINIMUM_VERSION = 1;
+
 function LiveRoster:new()
 	local self = {};
 	self.Version = 0;
 	self.LatestVersionSeen = 0;
 	self.Roster = {
-		IndexCollection = { -- Name <-> Index Relationship for currently open roster frame.  Rebuilt every time the roster is opened.
-		},
-		CharacterData = { -- Data that should reasonably never change.  Check for new entries when the player logs on.  The records are automatically rebuilt once per month, and can be manually rebuilt using a FullGuildSyncRequest.  
-		},
-		CharacterData2 = { -- Data that should rarely change, or that may change frequently until it reaches a cap (Level, Reputation, etc).  The records are automatically rebuilt every time the player logs in.
-		},
-		GuildRosterRecord = { -- Guild Roster Data that changes frequently.  The records are updated every hour while the player is not in combat, or when the player logs in.
-		},
-		SpecInformation = { -- Data about a character's spec-specific item level.  The records are updated every time the player logs in.
-		},
-		RaidProgress = { -- Data about a character's raid progress.  The records are updated every time the player logs in.  Addon users will broadcast a record update when they down a new raid boss.
-		},
-		DungeonProgress = { -- Data about a character's Mythic Plus Dungeon Progress.  The records are updated every time the player logs in. Addon users will broadcast a record update when they achieve a new personal best.
-		},
-		PlayerAlternateCharacters = { -- A list of alternate characters for each main character.  These records are rebuilt whenever the associated CharacterData record is rebuilt.  Addon users will broadcast an update when they join a guild linked with the guild another one of their characters is in.
-		},
-		Mappers = {
-			CharacterData = {
-				f = "FullName",
-				s = "ShortName",
-				g = "GuildContextName",
-				c = "Class",
-				C = "ClassFileName",
-				I = "InvitedBy",
-				J = "JoinDate",
-				O = "Originated"
-			},
-			InvertedCharacterData = {},
-			CharacterData2 = {
-				g = "GuildName",
-				r = "Rank",
-				R = "RankIndex",
-				l = "Level",
-				s = "CanSoR",
-				u = "Reputation",
-				A = "AchievementPoints",
-				a = "AchievementRank",
-				v = "IsAlternateCharacter",
-				M = "MainName",
-				O = "Originated"
-			},
-			InvertedCharacterData2 = {},
-			GuildRosterRecord = {
-				O = "Originated",
-				z = "Zone",
-				n = "Note",
-				o = "OfficerNote",
-				a = "Online",
-				s = "Status",
-				m = "IsMobile"
-			},
-			InvertedGuildRosterRecord = {},
-			SpecInformation = {
-				O = "Originated",
-				n = "SpecName",
-				i = "ItemLevel",
-				p = "Name",
-			},
-			InvertedSpecInformation = {},
-			RaidProgressRecord = {
-				O = "Originated",
-				i = "InstanceName",
-				b = "BossName",
-				d = "Difficulty"
-			}
-			
-		},
-		RosterFrameData = { -- Amalgamated data from CharacterData, CharacterData2, VolatileCharacterData, and PlayerAlternateCharacters.
-			
-		},
+
 	};
 	self.Classes = {};
 	self.Communication = {
@@ -111,6 +43,15 @@ function LiveRoster:new()
 			InvertedMessageKeys = {};
 		}
 	};
+	self.Mappers = {
+		
+		RaidProgressRecord = {
+			O = "Originated",
+			i = "InstanceName",
+			b = "BossName",
+			d = "Difficulty"
+		}
+	}
 	self.Logging = {
 		DisplayLogPrefix = "\124cFFFF0000Live Roster:\124r"
 	};
@@ -120,6 +61,7 @@ function LiveRoster:new()
 	return self;
 end
 function LiveRoster.addFunctions(self)
+
 	self.TrySaveRosterItem = function(self,collectionName,item) -- Attempts to save the roster item.  It will return true if the item successfully saves.  It will return false if the item does not save.  If the item fails to save because the record is out of date, then the newer record will be returned so it can be sent back to the source.
 		local main = item.MainName;
 		if not not main then
@@ -559,6 +501,162 @@ LR_ROUNDING = function(num,decimalPlaces)
 	local mult = 10^(decimalPlaces or 0);
 	return math.floor(num * mult) / mult;
 end
+
+LiveRoster_Roster = {
+	IndexCollection = { -- Name <-> Index Relationship for currently open roster frame.  Rebuilt every time the roster is opened.
+	},
+	CharacterData = { -- Data that should reasonably never change.  Check for new entries when the player logs on.  The records are automatically rebuilt once per month, and can be manually rebuilt using a FullGuildSyncRequest.  
+	},
+	CharacterData2 = { -- Data that should rarely change, or that may change frequently until it reaches a cap (Level, Reputation, etc).  The records are automatically rebuilt every time the player logs in.
+	},
+	GuildRosterRecord = { -- Guild Roster Data that changes frequently.  The records are updated every hour while the player is not in combat, or when the player logs in.
+	},
+	SpecInformation = { -- Data about a character's spec-specific item level.  The records are updated every time the player logs in.
+	},
+	RaidProgress = { -- Data about a character's raid progress.  The records are updated every time the player logs in.  Addon users will broadcast a record update when they down a new raid boss.
+	},
+	DungeonProgress = { -- Data about a character's Mythic Plus Dungeon Progress.  The records are updated every time the player logs in. Addon users will broadcast a record update when they achieve a new personal best.
+	},
+	PlayerAlternateCharacters = { -- A list of alternate characters for each main character.  These records are rebuilt whenever the associated CharacterData record is rebuilt.  Addon users will broadcast an update when they join a guild linked with the guild another one of their characters is in.
+	},
+	RosterFrameData = { -- Amalgamated data from CharacterData, CharacterData2, VolatileCharacterData, and PlayerAlternateCharacters.
+	},
+}
+LR_METATABLESEARCH = function(k,plist)
+	for i=1, table.getn(plist) do
+		local v = plist[i][k]
+		if v then return v end
+	end
+end
+LR_SETMETATABLES = function(item,classes)
+	setmetatable(item, { 
+		__index = function (t, k)
+			local v = LR_METATABLESEARCH(k,classes);
+			t[k] = v;
+			return v;
+		end
+	});
+end
+
+LiveRoster_RosterItem = {
+	Type = "",
+	CharacterName = "",
+	Originated = 0,
+	Save = function(self)
+		if self.Type then
+			local roster = LiRos.Roster[self.Type];
+			local existingItem = roster[self.CharacterName];
+			if existingItem.Originated and existingItem.Originated > self.Originated then
+				for k,v in pairs(self)
+					if type(v) ~= function then
+						existingItem[k] = v;
+					end
+				end
+			end
+		end
+	end
+	New = function(self,values)
+		local me = values or {};
+		setmetatable(me,self);
+		self.__index = self;
+		return me;
+	end
+}
+
+LiveRoster_Character = {
+	New = function(self,values)
+		local me = values or {};
+		LR_SETMETATABLES(me,LiveRoster_CharacterData, LiveRoster_RosterItem);
+		me.Type = "Character";
+		return me;
+	end
+	ShortName = "",
+	GuildContextName = "",
+	Class = "",
+	InvitedBy = "",
+	JoinDate = ""
+}
+
+LiveRoster_Character2 = {
+	New = function(self,values)
+		local me = values or {};
+		LR_SETMETATABLES(me,LiveRoster_Character2, LiveRoster_RosterItem);
+		me.Type = "Character2";
+		return me;
+	end
+	GuildName = "",
+	Rank = "",
+	RankIndex = 16,
+	Level = 1,
+	CanSoR = false,
+	Reputation = 0,
+	AchievementPoints = 0,
+	IsAlternateCharacter = false,
+	MainName = "",
+	Originated = 0
+}
+
+LiveRoster_GuildCharacter = {
+	New = function(self,values)
+		local me = values or {};
+		LR_SETMETATABLES(me,LiveRoster_GuildCharacter, LiveRoster_RosterItem);
+		me.Type = "GuildCharacter";
+		return me;
+	end
+	Zone = "",
+	Note = "",
+	OfficerNote = "",
+	Online = 0,
+	Status = "",
+	IsMobile = false,
+	Originated = 0
+}
+
+LiveRoster_CharacterSpecializations = {
+	New = function(self,values)
+		local me = values or {};
+		LR_SETMETATABLES(me,LiveRoster_CharacterSpecializations, LiveRoster_RosterItem);
+		me.Type = "CharacterSpecializations";
+		return me;
+	end
+	Specialization1 = {},
+	Specialization2 = {},
+	Specialization3 = {},
+	Specialization4 = {},
+	SpecializationCount = 0,
+	GetMaxItemLevel = function(self,role)
+		local s1 = self.Specialization1;
+		local s2 = self.Specialziation2;
+		local s3 = self.Specialization3;
+		local s4 = self.Specialization4;
+		if not role then
+			return math.max(s1.ItemLevel or 0, s2.ItemLevel or 0, s3.ItemLevel or 0, s4.ItemLevel or 0);
+		else
+			local maxILvl = 0;
+			if s1.Role == role and s1.ItemLevel > maxIlvl then maxIlvl = s1.ItemLevel; end
+			if s2.Role == role and s2.ItemLevel > maxIlvl then maxIlvl = s2.ItemLevel; end
+			if s3.Role == role and s3.ItemLevel > maxIlvl then maxIlvl = s3.ItemLevel; end
+			if s4.Role == role and s4.ItemLevel > maxIlvl then maxIlvl = s4.ItemLevel; end
+			return maxIlvl;
+		end
+	end
+}
+
+LiveRoster_CharacterRaidProgress = {
+	New = function(self,values)
+		local me = values or {};
+		LR_SETMETATABLES(me,LiveRoster_Raids, LiveRoster_RosterItem);
+		me.Type = "CharacterRaidProgress";
+		for k,v in pairs(LiRos.Raids) do
+			for a,b in pairs(v) do
+				me[k][a] = b;
+			end
+		end
+		return me;
+	end
+}
+
+LiveRoster_RaidProgress
 
 function LiveRoster.Update(self) -- Insert code here to ensure LiveRoster object settings are updated when new versions are released.
 	if self.Version < LR_MINIMUM_VERSION then
