@@ -1,64 +1,72 @@
-LiveRoster = {};
 LR_VERSION = 1;
 LR_MINIMUM_VERSION = 1;
-
-function LiveRoster:new()
-	local self = {};
-	self.Version = 0;
-	self.LatestVersionSeen = 0;
-	self.Roster = {
-
-	};
-	self.Classes = {};
-	self.Communication = {
-		TimeOutDuration = 5; -- The number of seconds to wait for a response before handling the timeout function.
-		DataItemSeparator = ";";
-		KeyValueSeparator = ",";
-		Prefix = "LIVEROSTER";
-		Mappers = {
-			MessageKeys = { --abcdnoqst
-				a = "CharacterData", -- This message contains a CharacterData object.
-				b = "CharacterData2", -- This message contains a CharacterData2 object.
-				c = "VolatileCharacterData", -- This message contains a VolatileCharacterData object.
-				d = "AlternateCharacters", -- This message contains an alternate character object.
-				e = "VersionCheckRequest", -- This message is requesting the current version of the Player's LiveRoster addon.
-				f = "SpeakerCheckRequest", -- This message is requesting the current Speaker for the Player's guild.
-				g = "SpeakerHandoffRequest", -- This message is requesting the Player's addon take over the role of Speaker.
-				h = "CharacterDataRequest", -- This message is requesting the CharacterData object for a given Character.
-				i = "CharacterData2Request", -- This message is requesting the CharacterData2 object for a given Character.
-				j = "VolatileCharacterDataRequest", -- This message is requesting the VolatileCharacterData object for a given Character.
-				k = "FullGuildSyncRequest", -- This message is requesting a full sync of the Player's guild.
-				l = "SpeakerHandoffAccept", -- This message is accepting the role of Speaker.
-				m = "SpeakerHandoffDecline", -- This message is declining to accept the role of Speaker.
-				n = "VersionCheck" -- Response to VersionCheck.
-				o = "GuildRosterRecord" -- Contains GuildRosterRecord.
-				p = "GuildRosterRecordRequest" -- Requests GuildRosterRecord for a character.
-				q = "SpecRecord" -- Contains information about a unit's spec and item level.
-				r = "SpecRecordRequest" -- Requests spec data for a unit.
-				s = "MythicPlusDungeonRecord" -- Contains data on a player's progress in a specific Mythic Plus Dungeon.
-				r = "MythicPlusDungeonRecordRequest" -- Request for data on a player's progress in a specific Mythic Plus Dungeon.
-				t = "RaidProgressRecord" -- Contains data on a player's progress ina  specific Raid.
-				u = "RaidProgressRecordRequest" -- Requests data on a player's progress in a specific Raid.
-			}
-			InvertedMessageKeys = {};
-		}
-	};
-	self.Mappers = {
-		
-		RaidProgressRecord = {
-			O = "Originated",
-			i = "InstanceName",
-			b = "BossName",
-			d = "Difficulty"
-		}
-	}
-	self.Logging = {
-		DisplayLogPrefix = "\124cFFFF0000Live Roster:\124r"
-	};
-	self.LiveRosterPenetration = {
-		CharactersWithLiveRoster = {};
-	};
-	return self;
+LR_ROSTERSORT = function(a,b)
+	sort = LiRos.SortObject;
+	if not sort or sort == {} then 
+		LiRos.SortObject = {};
+		LiRos.SortObject[1] = { Name = "Online", Inverted = false };
+		LiRos.SortObject[2] = { Name = "FullName", Inverted = false };
+		sort = LiRos.SortObject;
+	end
+	for index,value in ipairs(sort) do
+		local n = value[Name];
+		local aVal = a[n], bVal = b[n];
+		if aVal ~= bVal then 
+			if value[Inverted] then return aVal < bVal; else return aVal > bVal; end
+		end
+	end
+	return a["FullName"] > b["FullName"];
+end
+LR_ROUNDING = function(num,decimalPlaces)
+	local mult = 10^(decimalPlaces or 0);
+	return math.floor(num * mult) / mult;
+end
+LR_METATABLESEARCH = function(k,plist)
+	for i=1, table.getn(plist) do
+		local v = plist[i][k]
+		if v then return v end
+	end
+end
+LR_SETMETATABLES = function(item,classes)
+	setmetatable(item, { 
+		__index = function (t, k)
+			local v = LR_METATABLESEARCH(k,classes);
+			t[k] = v;
+			return v;
+		end
+	});
+end
+LR_ISVALIDDATE = function(str)
+	local sanitizedStr,_ = gsub(str,"%D","/");
+	local d1, d2, d3 = strmatch(sanitizedStr,"(%d+)/(%d+)/(%d+)");
+	d1, d2, d3 = tonumber(d1), tonumber(d2), tonumber(d3);
+	local year,month,day = 0,0,0;
+	if d1 > 1000 then 
+		year = d1;
+	elseif d2 > 1000 then
+		year = d2;
+	else
+		year = d3;
+	end
+	if d < 0 or d > 31 or m < 0 or m > 12 or y < 0 then
+    -- Cases that don't make sense
+		return false,nil
+	elseif m == 4 or m == 6 or m == 9 or m == 11 then 
+		-- Apr, Jun, Sep, Nov can have at most 30 days
+		return d <= 30
+	elseif m == 2 then
+		-- Feb
+		if y%400 == 0 or (y%100 ~= 0 and y%4 == 0) then
+			-- if leap year, days can be at most 29
+			return d <= 29
+		else
+			-- else 28 days is the max
+			return d <= 28
+		end
+	else 
+		-- all other months can have at most 31 days
+		return d <= 31
+	end
 end
 function LiveRoster.addFunctions(self)
 
@@ -87,7 +95,7 @@ function LiveRoster.addFunctions(self)
 	self.ParseMessageToRosterItem = function(self,rosterType,message) -- Converts a message to a roster item.
 		local me = {};
 		local data = substr(message,2);
-		local dataItemSeparator = self.Communciation.DataItemSeparator;
+		local dataItemSeparator = self.Communication.DataItemSeparator;
 		local keyValueSeparator = self.Communication.KeyValueSeparator;
 		local splitData = split(data,dataItemSeparator);
 		local mapper = self.Roster.Mappers[rosterType];
@@ -100,7 +108,7 @@ function LiveRoster.addFunctions(self)
 	end;
 	self.ParseRosterItemToMessage = function(self,collectionName,item) -- Converts a roster item to a message data stream.
 		local me = "";
-		local dataItemSeparator = self.Communciation.DataItemSeparator;
+		local dataItemSeparator = self.Communication.DataItemSeparator;
 		local keyValueSeparator = self.Communication.KeyValueSeparator;
 		local mapper = self.Roster.Mappers["Inverted"..collectionName];
 		for k,v in pairs(item) do
@@ -139,18 +147,6 @@ function LiveRoster.addFunctions(self)
 	self.LogMessage = function(self,message)  -- Logs a message to the default chat frame.
 		DEFAULT_CHAT_FRAME:AddMessage(self.Logging.DisplayLogPrefix..message); 
 	end
-	self.GetRosterItemLevel = function(characterSpecInfo,classObject,role) -- Gets the highest item level for a character.
-		local iLvl = 0;
-		for specIndex = 1,4 do
-			specInfo = characterSpecInfo[specIndex];
-			if not specInfo then specInfo = { ItemLevel = -1 }; 
-			local specIlvl = specInfo.Ilvl;			
-			if not role or (role == classObject.Specs[specIndex].Role) then
-				if iLvl < specIlvl then iLvl = specIlvl;
-			end
-		end
-		return iLvl;
-	end
 	self.GetFilteredRoster = function(self,filterObject,sortObject) -- Returns the filtered and sorted roster to the UI.
 		-- FilterObject: { Name:"", Death Knight: true, Demon Hunter: true, Druid: true, Hunter: true, Mage: true, Monk: true, Paladin: true, Priest: true
 		--				, Rogue: true, Shaman: true, Warlock: true, Warrior: true, Tank: true, Melee: true, Ranged: true, Healer: true
@@ -174,29 +170,6 @@ function LiveRoster.addFunctions(self)
 		self.SortObject = sortObject or {};
 		return localsort(output,LR_ROSTERSORT);
 	end
-	self.ValidateRoleAndILvl = function(self,tank,healer,ranged,melee,rosterDataItem,itemLevelFilter) -- Validates role and item level for the filtering function.
-		for index,value in ipairs(self.Classes[class].Specs)
-			if ((tank and value.Role == "Tank") or (healer and value.Role == "Healer") or (melee and value.Role == "Melee") or (ranged and value.Role == "Ranged")) and rosterDataItem["Spec"..index] >= itemLevelFilter then
-					return true;
-			end
-		end
-		return false;
-	end
-	self.GetHighestMythicPlusCompleted = function(self,mythicDungeonsRecord) -- Returns the highest completed mythic plus dungeon.
-		local output = 0;
-		for k,v in pairs(mythicDungeonsRecord.DungeonProgress) do
-			if output < v then output = v;
-		end
-		return output;
-	end
-	self.GetLatestRaidTierKills = function(self,raidProgress,difficulty) -- Returns the number of bosses down in the latest raid tier.
-		local output = 0;
-		local localLength = table.getn;
-		for k,v in pairs(raidProgress)
-			if v[difficulty] > 0 then output = output + 1;
-		end
-		return output;
-	end
 	self.FilterRosterItem = function(self,rosterDataItem,filterObject,name,isTank,isMelee,isRanged,isHealer,minItemLevel,mythicPlus,raidProgression,hasAOTC,hasCE)  -- Compares the roster item to the filter parameters to determine if the roster item should be passed back to the UI.
 		local output = {};
 		local localInsert = table.insert;
@@ -214,160 +187,7 @@ function LiveRoster.addFunctions(self)
 		else return true;
 		end
 	end
-	self.GetDetailedCharacterData = function(self,name)
-		local data = self.Roster.CharacterData[name];
-		local data2 = self.Roster.CharacterData2[name];
-		local guild = self.Roster.GuildRoster[name];
-		local raids = self.Roster.RaidProgress[name];
-		local dungeons = self.Roster.DungeonProgress[name];
-		local arenas = self.Roster.Arenas[name];
-		local battlegrounds = self.Roster.Battlegrounds[name];
-		local petBattles = self.Roster.PetBattles[name];
-		local specs = self.Roster.Specs[name];
-		local alts = self.Roster.AlternateCharacters[name];
-		local class = data.Class;
-		local output = {
-			FullName = data.FullName,
-			Class = class,
-			Specs = {},
-			RaidProgress = {},
-			MythicPlus = {},
-			Arenas = {},
-			Battlegrounds = {},
-			PetBattles = {},
-			Alts = {}
-		};
-		for index,value in ipairs(self.Classes[class].Specs) do
-			output.Specs[index] = {
-				Name = value.Name,
-				Role = value.Role,
-				SpecIcon = "",
-				RoleIcon = "",
-				ItemLevel = specs[index].Value;
-			};
-		end
-		for index,value in ipairs(self.Raids) do
-			raids[value.Name] = {
-				Normal = self:GetRaidKills(progress,value.Name,"Normal").."/"..value.NormalBossCount;
-				Heroic = self:GetRaidKills(progress,value.Name,"Heroic").."/"..value.HeroicBossCount;
-				Mythic = self:GetRaidKills(progress,value.Name,"Mythic").."/"..value.MythicBossCount;
-				HasAOTC = not not progress.AOTC[value.Name];
-				HasCE = not not progress.CuttingEdge[value.Name];
-			}
-		end
-		for index,value in ipairs(self.MythicDungeons) do
-			if not not dungeons[value.Name] then
-				output.MythicDungeons.DungeonProgress[value.Name] = dungeonProgress[value.Name].HighestCompleted;
-			else
-				output.MythicDungeons.DungeonProgress[value.Name] = 0;
-			end
-		end
-		output.MythicDungeons.Keystone = dungeons.Keystone;
-		output.PetBattles["PvP Wins"] = petBattles.PvPWins;
-		output.PetBattles["Pets Collected"] = petBattles.PetsCollected;
-		output.Arenas = {};
-		for index,value in ipairs(self.Arenas) do
-			local stats = arenas[value];
-			local arena = { Wins = 0, Played = 0, WinRatio = "0%" };
-			if not not stats then
-				arena = { Wins = stats.Wins or 0, Played = stats.Played or 0, WinRatio = "0%" };
-				if arena.Played ~= 0 then
-					arena.WinRatio = LR_ROUNDING(arena.Wins / arena.Played,2).."%";
-				end
-			end
-			output.Arenas[value] = arena;
-		end
-		output.Battlegrounds = {};
-		output.RatedBattlegrounds = {};
-		for index,value in ipairs(self.Battlegrounds) do
-			local stats = battlegrounds[value];
-			local bg = { Wins = 0, Played = 0, WinRatio = "0%" };
-			local ratedbg = { Wins = 0, Played = 0, WinRatio = "0%" };
-			if not not stats then
-				bg = { Wins = stats.Wins, Played = stats.Played, WinRatio = "0%" };
-				ratedbg = { Wins = stats.RatedWins, Played = stats.RatedPlayed, WinRatio = "0%" };
-				if bg.Played ~= 0 then
-					bg.WinRatio = LR_ROUNDING(bg.RatedWins / bg.RatedPlayed,2).."%";
-				end
-			end
-			output.Battlegrounds[value] = bg;
-			output.RatedBattlegrounds[value] = ratedbg;
-		end
-		local alts = {};
-		local mainName = data2.MainName;
-		if data2.IsAlternateCharacter then 
-			alts = { self:CreateAltCard(mainName) };
-		end
-		for index,value in ipairs(self.Roster.CharacterData2[mainName].Alts) do
-			if value ~= name then
-				table.insert(alts,self:CreateAltCard(value));
-			end
-		end
-		output.AltCards = alts;
-		return output;
-	end
-	self.BuildRosterFrameData = function(self) -- Run every time roster is opened.
-		local rosterFrameData = {};
-		local characterData = self.Roster.CharacterData;
-		local characterData2 = self.Roster.CharacterData2;
-		local raidProgress = self.Roster.RaidProgress;
-		local guildRoster = self.Roster.GuildRoster;
-		local dungeonProgress = self.Roster.DungeonProgress;
-		local specInformation = self.Roster.SpecInformation;
-		local arenas = self.Roster.Arenas;
-		local battlegrounds = self.Roster.Battlegrounds;
-		local petBattles = self.Roster.PetBattles;
-		for k,v in pairs(self.CharacterData) do
-			local raid = raidProgress[k] or self:EmptyRaidProgress();
-			local data2 = characterData2[k] or self:EmptyCharacterData2();
-			local guild = guildRoster[k] or self:EmptyGuildRoster();
-			local dungeon = dungeonProgress[k] or self:EmptyDungeonProgress();
-			local specs = self:SanitizeSpecInformation(specInformation[k]);
-			local arena = arenas[k] or self:EmptyArena();
-			local battleground = battleground[k] or self:EmptyBattleground();
-			local petBattle = petBattles[k] or self:EmptyPetBattle();
-			local output = {
-				Name = k,
-				Class = v.Class,
-				Level = data2.Level,
-				Zone = guild.Zone,
-				Spec1 = specs.Spec1.Value,
-				Spec2 = specs.Spec2.Value,
-				ILvl = self:GetRosterItemLevel(specs),
-				Tank = self:GetRosterItemLevel(specs,classObject,"Tank"),
-				Healer = self:GetRosterItemLevel(specs,classObject,"Healer"),
-				Melee = self:GetRosterItemLevel(specs,classObject,"Melee"),
-				Ranged = self:GetRosterItemLevel(specs,classObject,"Ranged"),
-				Raid = self:GetLatestRaidTierKills(raid[self.LatestRaid]),
-				RankIndex = data2.RankIndex,
-				Rank = data2.Rank,
-				Guild = v.Guild
-			};
-			if specs.Spec3.Value > -1 then 
-				output["Spec3"] = specs.Spec3.Value;
-				if specs.Spec4.Value > -1 then 
-					output["Spec4"] = specs.Spec4.Value; 
-				end
-			end
-			output["M+"] = self:GetHighestMythicPlusCompleted(dungeonProgress);
-			output["2v2"] = self:FormatArenaData("2v2",arena);
-			output["3v3"] = self:FormatArenaData("3v3",arena);
-			output["5v5"] = self:FormatArenaData("5v5",arena);
-			output["BGs"] = self:FormatBattlegroundData("All",battleground);
-			output["RBGs"] = self:FormatBattlegroundData("Rated",battleground);
-			rosterFrameData[k] = output;
-		end
-	end
-	self.EmptyCharacterData2 = function(self) -- Empty CharacterData2 object for displaying placeholder data on the frame.
-	end
-	self.BuildGroupRoster = function(self)
-		local groupSize = GetNumGroupMembers();
-		self.GroupRoster = {};
-		for idx = 1,groupSize do
-			name, rank, subgroup, level, class, fileName, zone, online, isDead, role, isML = GetRaidRosterInfo(idx);
-			self.GroupRoster[idx] = { Name = name };
-		end
-	end
+	
 	self.HandleCombatEnd = function(self)
 		self.CommunicationEnabled == true;
 		if not not self.CombatEncounter then
@@ -411,31 +231,8 @@ function LiveRoster.addFunctions(self)
 		end
 	end
 	self.HandleMessage = function(self,messageKey,sender,message,channel)
-		local messageType = self.Communication.Mappers.MessageKeys[messageKey];
-		local rosterItem = self:ParseMessage(messageType,message);
-		local isRoster,_ =  "abcdnoqst":find(messageKey); -- Concatenated string of message keys, checking to see if message key exists.  Faster than loop.
-		if not not isRoster then
-			local saved,update = self:TrySaveRosterItem(messageType,rosterItem);
-			local updateAsMessage = self:ParseRosterItemToMessage(messageType,rosterItem);
-			if not saved and not not update then
-				if not self.IsSpeaker then
-					SendAddonMessage(self.Communication.Prefix,self.Communication.Mappers.InvertedMessageKeys[messageType]..updateAsMessage,"WHISPER",sender);
-				else
-					SendAddonMessage(self.Communication.Prefix,self.Communication.Mappers.InvertedMessageKeys[messageType]..updateAsMessage,"GUILD");
-				end
-			end
-		else
-			isRequest,_ = messageType:find("Request");
-			if not not isRequest then
-				local rosterType = messageType:sub("Request","");
-				local request = self:ParseMessage(messageType,message)
-				local responseObject = self.Roster[rosterType][request.Name];
-				local responseMessage = self:ParseObjectToMessage(rosterType,responseObject);
-				SendAddonMessage(self.Communciation.Prefix,self.Communication.Mappers.InvertedMessageKeys[rosterType]..responseMessage,"WHISPER",sender);
-			else
-				self:LogMessage(messageType.." has no handler attached.");
-			end
-		end
+		local msg = LiveRoster_InboundMessage(messageKey,message,channel,sender or {});
+		msg.SaveOrRespond();
 	end
 	self.AddToPendingMessages = function(messageKey,sender,message,channel)
 		self.PendingMessages = self.PendingMessages or {};
@@ -479,28 +276,48 @@ function LiveRoster.RegisterEvents(self)
 	end)
 end
 
-LR_ROSTERSORT = function(a,b)
-	sort = LiRos.SortObject;
-	if not sort or sort == {} then 
-		LiRos.SortObject = {};
-		LiRos.SortObject[1] = { Name = "Online", Inverted = false };
-		LiRos.SortObject[2] = { Name = "FullName", Inverted = false };
-		sort = LiRos.SortObject;
+
+LiveRoster = {
+	New = function(self,savedSelf)
+		local me = {};
+		LR_SETMETATABLES(me,{ LiveRoster });
+		me.Version = LR_VERSION;
+		me.LatestVersionSeen = 0;
+		return me;
 	end
-	for index,value in ipairs(sort) do
-		local n = value[Name];
-		local aVal = a[n], bVal = b[n];
-		if aVal ~= bVal then 
-			if value[Inverted] then return aVal < bVal; else return aVal > bVal; end
+	Version = 0,
+	LatestVersionSeen = 0,
+};
+
+LiveRoster_Logger = {
+	AddOn = "";	
+	New = function(self,context)
+		local me = {};
+		LR_SETMETATABLES(me,{ LiveRoster_Logger });
+		me.AddOn = "\124cFFFF0000Live Roster\124r";
+		return me;
+	end
+	Inform = function(self,message)
+		if LiRos.Settings.Debug.Inform then
+			DEFAULT_CHAT_FRAME:AddMessage(self.Addon..":"..message); 
 		end
 	end
-	return a["FullName"] > b["FullName"];
-end
-
-LR_ROUNDING = function(num,decimalPlaces)
-	local mult = 10^(decimalPlaces or 0);
-	return math.floor(num * mult) / mult;
-end
+	Log = function(self,message)
+		if LiRos.Settings.Debug.Log then
+			DEFAULT_CHAT_FRAME:AddMessage(self.Addon..":"..message);
+		end
+	end
+	Warn = function(self,message)
+		if LiRos.Settings.Debug.Warn then
+			DEFAULT_CHAT_FRAME:AddMessage(self.Addon..":"..message);
+		end
+	end
+	Error = function(self,message)
+		if LiRos.Settings.Debug.Error then
+			DEFAULT_CHAT_FRAME:AddMessage(self.Addon..":"..message);
+		end
+	end
+}
 
 LiveRoster_Roster = {
 	IndexCollection = { -- Name <-> Index Relationship for currently open roster frame.  Rebuilt every time the roster is opened.
@@ -517,41 +334,98 @@ LiveRoster_Roster = {
 	},
 	DungeonProgress = { -- Data about a character's Mythic Plus Dungeon Progress.  The records are updated every time the player logs in. Addon users will broadcast a record update when they achieve a new personal best.
 	},
+	BattlegroundProgress = { -- Data about a character's Battleground and RatedBattleground statistics.  These records are updated every time the player logs in.  Addon users will broakdcast a record update when they achieve a new personal best.	
+	},
+	ArenaProgress = { -- Data about a character's Arena and Rated Arena statistics.  These records are updated every time the player logs in.  Addon users will broakdcast a record update when they achieve a new personal best.	
+	},
 	PlayerAlternateCharacters = { -- A list of alternate characters for each main character.  These records are rebuilt whenever the associated CharacterData record is rebuilt.  Addon users will broadcast an update when they join a guild linked with the guild another one of their characters is in.
 	},
-	RosterFrameData = { -- Amalgamated data from CharacterData, CharacterData2, VolatileCharacterData, and PlayerAlternateCharacters.
-	},
-}
-LR_METATABLESEARCH = function(k,plist)
-	for i=1, table.getn(plist) do
-		local v = plist[i][k]
-		if v then return v end
+	New = function(self,savedSelf)
+		local me = savedSelf or {};
+		LR_SETMETATABLES(me, { LiveRoster_Roster });
+		return me;
 	end
-end
-LR_SETMETATABLES = function(item,classes)
-	setmetatable(item, { 
-		__index = function (t, k)
-			local v = LR_METATABLESEARCH(k,classes);
-			t[k] = v;
-			return v;
-		end
-	});
-end
+	Build = function(self)
 
+	end
+	GetCharacterDetail = function(self,name)
+
+	end
+	GetServerDataByName = function(self,name)
+
+	end
+	GetServerDataByIndex = function(self,index)
+		local fullName, rank, rankIndex, level, class, zone, note, officernote, online, status, classFileName, achievementPoints, achievementRank, isMobile, canSoR, reputation = GetGuildRosterInfo(index);
+		local character = LiveRoster_Character:New({ 
+			FullName: fullname, 
+			Class = class, 
+			ShortName = Ambiguate(fullname,"short"),
+			GuildContextName = Ambiguate(fullname,"guild"),
+		});
+		local character2 = LiveRoster_Character2:New({
+			FullName = fullname,
+			GuildName = LR.GuildName,
+			Rank = rank,
+			RankIndex = rankIndex,
+			Level = level,
+			CanSoR = canSoR,
+			Reputation = reputation,
+			AchievementPoints = achievementPoints,
+			IsAlternateCharacter = 
+			MainName = 
+		})
+
+	end
+	ParseGuildNote = function(self,note)
+		local noteArray = strsplit(note, " ");
+		local isAlt = "";
+		local mainName = "";
+		local joinDate = "";
+		local invitedBy = "";
+		if noteArray[1] == "Main" then -- Main Zatenkein 10-1-2017, Main 10-1-2017 Zatenkein
+			
+		elseif noteArray[1] == "Alt" then -- Alt Zatenkein
+
+		elseif noteArray[2] == "Alt" -- Zatenkein Alt
+
+		elseif 
+		end
+	end
+	BeginGetServerGuildData = function(self)
+		LR_Events:Register("GUILD_ROSTER_UPDATE",self:DoGetServerGuildData());
+		GuildRoster();
+	end
+	DoGetServerGuildData = function(self)
+		local guildSize = GetNumGuildMembers();
+		for i = 1, guildSize do
+			local character,character2,guildCharacter = self:GetServerDataByIndex(i);
+		end
+	end
+}
 LiveRoster_RosterItem = {
 	Type = "",
-	CharacterName = "",
+	FullName = "",
 	Originated = 0,
 	Save = function(self)
 		if self.Type then
 			local roster = LiRos.Roster[self.Type];
-			local existingItem = roster[self.CharacterName];
-			if existingItem.Originated and existingItem.Originated > self.Originated then
-				for k,v in pairs(self)
+			local existingItem = roster[self.FullName] or {};
+			if not existingItem.Originated or existingItem.Originated =< self.Originated then
+				for k,v in pairs(self) do
 					if type(v) ~= function then
 						existingItem[k] = v;
 					end
+				end	
+				LiRos.Roster[self.Type][self.FullName] = existingItem;
+				return true;
+			else
+				local content = {};
+				for k,v in pairs(self) do
+					if type(v) ~= function then
+						content[k] = v;
+					end
 				end
+				return false,content;
 			end
 		end
 	end
@@ -562,12 +436,12 @@ LiveRoster_RosterItem = {
 		return me;
 	end
 }
-
 LiveRoster_Character = {
 	New = function(self,values)
 		local me = values or {};
 		LR_SETMETATABLES(me,LiveRoster_CharacterData, LiveRoster_RosterItem);
 		me.Type = "Character";
+		me.Originated = time();
 		return me;
 	end
 	ShortName = "",
@@ -576,7 +450,6 @@ LiveRoster_Character = {
 	InvitedBy = "",
 	JoinDate = ""
 }
-
 LiveRoster_Character2 = {
 	New = function(self,values)
 		local me = values or {};
@@ -595,7 +468,6 @@ LiveRoster_Character2 = {
 	MainName = "",
 	Originated = 0
 }
-
 LiveRoster_GuildCharacter = {
 	New = function(self,values)
 		local me = values or {};
@@ -611,12 +483,17 @@ LiveRoster_GuildCharacter = {
 	IsMobile = false,
 	Originated = 0
 }
-
 LiveRoster_CharacterSpecializations = {
-	New = function(self,values)
+	New = function(self,values,class)
 		local me = values or {};
-		LR_SETMETATABLES(me,LiveRoster_CharacterSpecializations, LiveRoster_RosterItem);
-		me.Type = "CharacterSpecializations";
+		LR_SETMETATABLES(me,{LiveRoster_CharacterSpecializations, LiveRoster_RosterItem});
+		if not values and not not class then
+			local specs = LR_CLasses[class].Specializations;
+			for idx,val in ipairs(specs)
+				me["Specialization"..idx] = LiveRoster_Specialization:New({ Name = val.Name, Role = val.Role, ItemLevel = -1, PrimaryStat = val.PrimaryStat });
+				if idx > me.SpecializationCount then me.SpecializationCount = idx;
+			end
+		end
 		return me;
 	end
 	Specialization1 = {},
@@ -641,72 +518,302 @@ LiveRoster_CharacterSpecializations = {
 		end
 	end
 }
-
+LiveRoster_Specialization = {
+	ItemLevel = 0,
+	Name = "",
+	Role = "",
+	PrimaryStat = "",
+	New = function(self,values)
+		local me = values or {};
+		LR_SETMETATABLES(me, { LiveRoster_Specialization });
+		return me;
+	end
+}
 LiveRoster_CharacterRaidProgress = {
 	New = function(self,values)
 		local me = values or {};
-		LR_SETMETATABLES(me,LiveRoster_Raids, LiveRoster_RosterItem);
+		LR_SETMETATABLES(me,{ LiveRoster_CharacterRaidProgress, LiveRoster_RosterItem });
 		me.Type = "CharacterRaidProgress";
-		for k,v in pairs(LiRos.Raids) do
-			for a,b in pairs(v) do
-				me[k][a] = b;
+		return me;
+	end
+	GetProgress = function(self,raidName,difficulty)
+		if not raidName then raidName = LR_Raids.LatestRaid;
+		local myRaid = self.Raids[raidName];
+		local raid = LR_Raids[raidName];
+		if not difficulty then
+			if not myRaid then
+				return "0/"..raid.NormalBossCount.." N";
+			else
+				if myRaid.MythicProgress > 0 then
+					return myRaid.MythicProgress.."/"..raid.MythicBossCount.." M";
+				elseif myRaid.HeroicProgress > 0 then
+					return myRaid.HeroicProgress.."/"..raid.HeroicBossCount.." H";
+				else
+					return myRaid.NormalProgress.."/"..raid.NormalBossCount.." N";
+				end
+			end
+		else
+			if not myRaid then 
+				return "0/"..raid[difficulty.."BossCount"];
+			else
+				return myRaid[difficulty.."Progress"].."/"..raid[difficulty.."BossCount"];
 			end
 		end
+	end
+	Raids = {},
+}
+LiveRoster_RaidProgress = {
+	New = function(self,raid,values)
+		local me = values or {};
+		LR_SETMETATABLES(me,{ LiveRoster_RaidProgress });
+		me.Raid = raid;
+		return me;
+	end
+	Raid = "NoName",
+	NormalProgress = 0,
+	HeroicProgress = 0,
+	MythicProgress = 0,
+	AOTC = false,
+	CE = false	
+}
+LiveRoster_CharacterDungeonProgress = {}
+LiveRoster_CharacterBattlegroundProgress = {}
+LiveRoster_CharacterArenaProgress = {}
+
+LiveRoster_Communication = {
+	New = function(self,savedSelf)
+		local me = savedSelf or {};
+		LR_SETMETATABLES(me, { LiveRoster_Communication } )
+		me.Mappers = {
+			InboundMessageKeys = {
+				a = "CharacterRequest",
+				A = "Character",
+				b = "Character2Request",
+				B = "Character2",
+				c = "GuildCharacterRequest",
+				C = "GuildCharacter",
+				d = "CharacterSpecializationsRequest",
+				D = "CharacterSpecialization",
+				e = "CharacterRaidProgressRequest",
+				E = "CharacterRaidProgress",
+				f = "CharacterDungeonProgressRequest",
+				F = "CharacterDungeonProgress",
+				g = "CharacterBattlegroundsProgressRequest",
+				G = "CharacterBattlegroundProgress",
+				h = "CharacterArenaProgressRequest",
+				H = "CharacterArenaProgress",
+				i = "GuildSettingsRequest",
+				I = "GuildSettings"
+			},
+			OutboundMessageKeys = {
+				CharacterRequest = "a",
+				Character = "A",
+				Character2Request = "b",
+				Character2 = "B",
+				GuildCharacterRequest = "c",
+				GuildCharacter = "C",
+				CharacterSpecializationsRequest = "d",
+				CharacterSpecialization = "D",
+				CharacterRaidProgressRequest = "e",
+				CharacterRaidProgress = "E",
+				CharacterDungeonProgressRequest = "f",
+				CharacterDungeonProgress = "F",
+				CharacterBattlegroundsProgressRequest = "g",
+				CharacterBattlegroundProgress = "G",
+				CharacterArenaProgressRequest = "h",
+				CharacterArenaProgress = "H",
+				GuildSettingsRequest = "i",
+				GuildSettings = "I"
+			},
+			OutboundCharacterRequest = {
+				FullName = "a"
+			},
+			InboundCharacterRequest = {
+				a = "FullName"
+			},
+			OutboundCharacter = {
+				Originated = "O",
+				FullName = "a",
+				ShortName = "b",
+				GuildContextName = "c",
+				Class = "d",
+				InvitedBy = "e",
+				JoinDate = "f"
+			},
+			InboundCharacter = {
+				O = "Originated",
+				a = "FullName",
+				b = "ShortName",
+				c = "GuildContextName",
+				d = "Class",
+				e = "InvitedBy",
+				f = "JoinDate"
+			},
+			OutboundCharacter2Request = {
+				FullName = "a"
+			},
+			InboundCharacter2Request = {
+				a = "FullName"
+			},
+			OutboundCharacter2 = {},
+			InboundCharacter2 = {},
+			OutboundGuildCharacterRequest = {
+				FullName = "a"
+			},
+			InboundGuildCharacterRequest = {
+				a = "FullName"
+			},
+			OutboundGuildCharacter = {},
+			InboundGuildCharacter = {},
+			OutbooundCharacterSpecializationRequest = {
+				FullName = "a",
+				SpecializationIndex = "b"
+			},
+			InboundCharacterSpecializationRequest = {
+				a = "FullName",
+				b = "SpecializationIndex"
+			},
+			OutboundCharacterSpecialization = {},
+			InboundCharacterSpecialization = {},
+			OutboundCharacterRaidProgressRequest = {
+				FullName = "a",
+				RaidName = "b"
+			},
+			InboundCharacterRaidProgressRequest = {
+				a = "FullName",
+				b = "RaidName"
+			},
+			OutboundCharacterRaidProgress = {
+			
+			},
+			InboundCharacterRaidProgress = {
+		
+			},
+			OutboundCharacterDungeonProgressRequest = {
+				FullName = "a",
+				DungeonName = "b"
+			},
+			InboundCharacterDungeonProgressRequest = {
+				a = "FullName",
+				b = "DungeonName"
+			},
+			OutboundCharacterDungeonProgress = {
+		
+			},
+			InboundCharacterDungeonProgress = {
+		
+			},
+			OutboundCharacterBattlegroundProgressRequest = {
+				FullName = "a",
+				BattlegroundName = "b",
+				Rated = "c"
+			},
+			InboundCharacterBattlegroundProgressRequest = {
+				a = "FullName",
+				b = "BattlegroundName",
+				c = "Rated"
+			},
+			OuboundCharacterBattlegroundProgress = {
+			
+			}, 
+			InboundCharacterBattlegroundProgress = {
+			
+			}, 
+			OutboundCharacterArenaProgressRequest = {
+				FullName = "a",
+				ArenaName = "b",
+				ArenaSize = "c",
+				Rated = "d"
+			},
+			InboundCharacterArenaProgressRequest = {
+				a = "FullName",
+				b = "ArenaName",
+				c = "ArenaSize",
+				d = "Rated"
+			},
+			OutboundCharacterArenaProgress = {
+		
+			},
+			InboundCharacterArenaProgress = {
+		
+			},
+			OutboundGuildSettingsRequest = {
+				GuildName = "a",
+			},
+			InboundGuildSettingsRequest = {
+				a = "GuildName",
+			},
+			OutboundGuildSettings = {
+		
+			},
+			InboundGuildSettings = {
+		
+			}
+		},
+		me.Prefix = "LIVEROSTER",
+		me.DataItemSeparator = ";",
+		me.TimeOutDuration = 5;
+	    return me;
+	end
+}
+LiveRoster_OutboundMessage = {
+	Type = "",
+	Content = {},
+	New = function(self,type,content)
+		local me = { Type = type, Content = content };
+		local comm = LiRos.Communication;
+		LR_SETMETATABLES(me,{ LiveRoster_OutboundMessage });
+		local key = comm.OutboundMessageKeys[type];
+		local mapper = comm.Mappers[mapperKey];
+		local dataSeparator = comm.DataSeparator;
+		local valueSeparator = comm.ValueSeparator;
+		local message = key;
+		for k,v in pairs(content) do
+			if message ~= key then
+				message = message..dataSeparator;
+			end
+			message = message..mapper[k]..valueSeparator..v;
+		end
+		return me;
+	end
+	SendToGuild = function(self)
+		SendAddonMessage(LiRos.Communication.Prefix,self.Message,"GUILD");
+	end
+	Whisper = function(self,target)
+		SendAddonMessage(LiRos.Communication.Prefix,self.Message,"WHISPER",target);
+	end
+}
+LiveRoster_InboundMessage = {
+	Type = "",
+	Content = {},
+	Sender = "",
+	Channel = "",
+	New = function(self,key,message,channel,sender)
+		local me = { Channel = channel, Sender = sender };
+		local comm = LiRos.Communication;
+		LR_SETMETATABLES(me, { LiveRoster_InboundMessage });
+		me.Type = comm.Mappers.InboundMessageKeys[key];
+		local mapper = comm.Mappers[me.Type];
+		local content = {};
+		local segments = {};
+		local dataSeparator = comm.DataItemSeparator;
+		local dataArray = strsplit(message,dataSeparator);
+		for idx,val in ipairs(dataArray)
+			local contentKey = mapper[strsub(val,1,1)];
+			content[contentKey] = strsub(val,2);
+		end
+		me.Content = content;
 		return me;
 	end
 }
 
-LiveRoster_RaidProgress
-
-function LiveRoster.Update(self) -- Insert code here to ensure LiveRoster object settings are updated when new versions are released.
-	if self.Version < LR_MINIMUM_VERSION then
-		local invertKeys = function(collection)
-			local output = {};
-			for k,v in pairs(collection) do
-				output[v] = k;
-			end
-			return output;
-		end
-		self.Communciation.Mappers.InvertedMessageKeys = invertKeys(self.Communication.Mappers.MessageKeys);
-		self.Roster.Mappers.InvertedCharacterData = invertKeys(self.Roster.Mappers.CharacterData);
-		self.Roster.Mappers.InvertedCharacterData2 = invertKeys(self.Roster.Mappers.CharacterData2);
-		self.Roster.Mappers.InvertedGuildRosterRecord = invertKeys(self.Roster.Mappers.GuildRosterRecord);
-		self.Roster.Mappers.InvertedSpecInformation = invertKeys(self.Roster.Mappers.SpecInformation);
-		local addClass = function(armor, spec1Name,spec1Role,spec1Stat,spec2Name,spec2Role,spec2Stat,spec3Name,spec3Role,spec3Stat,spec4Name,spec4Role,spec4Stat)
-			local me = { Armor = armor, Specs = {} };
-			me.Specs[1] = { Name = spec1Name, Role = spec1Role, Stat = spec1Stat };
-			me.Specs[2] = { Name = spec2Name, Role = spec2Role, Stat = spec2Stat };
-			if not not spec3Name then
-				me.Specs[3] = { Name = spec3Name, Role = spec3Role, Stat = spec3Stat };
-			end
-			if not not spec4Name then
-				me.Specs[4] = { Name = spec4Name, Role = spec4Role, Stat = spec4Stat };
-			end
-			return me;
-		end
-		self.Classes["Death Knight"] = addClass("Plate","Blood","Tank","Strength","Frost","Melee","Strength","Unholy","Melee","Strength");
-		self.Classes["Demon Hunter"] = addClass("Leather","Havoc", "Melee", "Agility", "Vengeance","Tank","Agility");
-		self.Classes["Druid"] = addClass("Leather","Balance","Ranged","Intellect","Feral","Melee","Agility","Guardian","Tank","Agility","Restoration","Heal","Intellect");
-		self.Classes["Hunter"] = addClass("Mail","Beast Mastery","Ranged","Agility","Marksmanship","Ranged","Agility","Survival","Melee","Agility");
-		self.Classes["Mage"] = addClass("Cloth","Arcane","Ranged","Intellect","Fire","Ranged","Intellect","Frost","Ranged","Intellect");
-		self.Classes["Monk"] = addClass("Leather","Brewmaster","Tank","Agility","Mistweaver","Healer","Intellect","Windwalker","Melee","Agility");
-		self.Classes["Paladin"] = addClass("Plate","Holy","Heal","Intellect","Protection","Tank","Strength","Retribution","Melee","Strength");
-		self.Classes["Priest"] = addClass("Cloth","Discipline","Heal","Intellect","Holy","Heal","Intellect","Shadow","Ranged","Intellect");
-		self.Classes["Rogue"] = addClass("Leather","Assassination","Melee","Agility","Outlaw","Melee","Agility","Subtlety","Melee","Agility");
-		self.Classes["Shaman"] = addClass("Mail","Elemental","Ranged","Intellect","Enhancement","Melee","Agility","Restoration","Heal","Intellect");
-		self.Classes["Warlock"] = addClass("Cloth","Affliction","Ranged","Intellect","Demonology","Ranged","Intellect","Destruction","Ranged","Intellect");
-		self.Classes["Warrior"] = addClass("Plate","Arms","Melee","Strength","Fury","Melee","Strength","Protection","Tank","Strength");
-		self.Healers = { "Druid", "Monk", "Paladin","Priest","Shaman"};
-		self.Tanks = { "Death Knight", "Demon Hunter", "Druid", "Monk", "Paladin", "Warrior" };
-		self.Melee = { "Death Knight", "Demon Hunter", "Druid", "Hunter", "Monk", "Paladin", "Rogue", "Shaman", "Warrior" };
-		self.Ranged = { "Druid", "Hunter", "Mage", "Priest", "Shaman", "Warlock"};
-		self.MythicPlusDungeons = { "Black Rook Hold", "Cathedral of Eternal Night", "Court of Stars", "Darkheart Thicket", "Eye of Azshara", "Halls of Valor", "Maw of Souls", "Neltharion's Lair", "The Arcway", "Vaul tof the Wardens", "Lower Karazhan", "Upper Karazhan", "Seat of the Triumverate" };
-		self.Version = LR_VERSION;
-	end
-end
-
-LiRos = LiRos or LiveRoster:new();
-LiRos:addFunctions();
-LiRos:Update();
-LiRos.Update = nil;
-LiRos.CommunicationEnabled = true;
+LR = LiveRoster:New(LR or nil); -- Manages versioning and addon settings.
+LR_Logger = LiveRoster_Logger:New(); -- Manages logging messages to user and error handling.
+LR_Communication = LiveRoster_Communiction:New(LR_Communication or nil); -- Manages addon communication.
+LR_Roster = LiveRoster_Roster:New(LR_Roster or nil); -- Manages roster information and storing data.
+LR_Classes = LiveRoster_ClassCollection:New(LR_Classes or nil); -- Library of class, role, and spec information.
+LR_Dungeons = LiveRoster_DungeonCollection:New(LR_Dungeons or nil); -- Library of dungeons.
+LR_Raids = LiveRoster_RaidsCollection:New(LR_Raids or nil); -- Library of raids.
+LR_Battlegrounds = LiveRoster_Battlegrounds:New(LR_Battlegrounds or nil); -- Library of Battlegrounds.
+LR_Arenas = LiveRoster_Arenas:New(LR_Arenas or nil); -- Library of Arenas.
+LR_Events = LiveRoster_Events:new(LR_Events or nil); -- Manages event-driven addon behavior.
