@@ -51,21 +51,23 @@ LR_ISVALIDDATE = function(str)
 	end
 end
 LR_ONUPDATE = function(self,elapsed)
-	local totalTime = LR_Waiter.TotalTime + elapsed;
-	LR_Waiter.TotalTime = totalTime;
-	local timeoutFunctions = LR_Waiter.TimeoutFunctions;
-	for k,v in pairs(timeoutFunctions) do
-		if totalTime >= v.ExecuteTime then 
-			v:Execute();
-			LR_Waiter.TimeoutFunctions[k] = nil;
+	if not LR.InCombat then 
+		local totalTime = LR_Waiter.TotalTime + elapsed;
+		LR_Waiter.TotalTime = totalTime;
+		local timeoutFunctions = LR_Waiter.TimeoutFunctions;
+		for k,v in pairs(timeoutFunctions) do
+			if totalTime >= v.ExecuteTime then 
+				v:Execute();
+				LR_Waiter.TimeoutFunctions[k] = nil;
+			end
 		end
-	end
-	timeoutFunctions = nil;
-	local intervalFuntions = LR_Waiter.IntervalFunctions;
-	for k,v in pairs(intervalFunctions) do
-		if totalTime >= v.ExecuteTime then 
-			v:Execute();
-			LR_Waiter.IntervalFunctions[k] = v.ExecuteTime + v.Interval;
+		timeoutFunctions = nil;
+		local intervalFuntions = LR_Waiter.IntervalFunctions;
+		for k,v in pairs(intervalFunctions) do
+			if totalTime >= v.ExecuteTime then 
+				v:Execute();
+				LR_Waiter.IntervalFunctions[k] = v.ExecuteTime + v.Interval;
+			end
 		end
 	end
 end
@@ -842,9 +844,8 @@ LiveRoster_Events = {
 			end
 		end,
 		INSPECT_READY = function(eventArgs)
-			
-		end,
-
+			LR_Inspector:BeginInspection();
+		end
 	}
 }
 
@@ -875,22 +876,63 @@ LiveRoster_Inspector = {
 		self.InspectionRunning = false;
 	end
 	BeginGroupInspection = function(self)
+		local igKey = "INSPECT_GROUP";
 		self.InspectionRunning = true;
-		local inspectTarget, startIndex = self:FindNextGroupMember(0);
-		local attempts = 0;
-		while not not inpsectTarget do
-			while not CanInspect(inspectTarget,false) do
-				if attempts < 10 then
-					attempts = attempts + 1;
+		LR_Waiter:RegisterInterval(10
+		,function(self,me,key,startIndex,attempts)
+			if not me.InspectPending then
+				local inspectTarget = '';
+				local attempts = attempts or 0;
+				local startIndex = startIndex or 0;
+				inspectTarget, startIndex = me:FindNextGroupMember(startIndex);
+				if not CanInspect(inspectTarget, false) then
+					if attempts >= 9 then
+						attempts = 0;
+						startIndex = startIndex + 1;
+					else
+						attempts = attempts + 1;
+					end
 				else
-					inspectTarget,startIndex = self:FindNextGroupMember(startIndex + 1);
-					attempts = 0;
+					NotifyInspect(inspectTarget);
+					me.InspectPending = true;
+					me.InspectTarget = inspectTarget;
 				end
+				LR_Waiter.IntervalFunctions[key].CallbackArgs = { me, key, startIndex, attempts };
 			end
-			attempts = 0;
-			self:BeginInspectPlayer(inspectTarget);
 		end
-	end
+		,{ self, igKey, 0, 0 }
+		,igKey)
+	end,
+	BeginInspection = function(self)
+		local target = self:InspectTarget;
+		LR_Waiter:RegisterTimeout(1,function(self,me,target)
+			
+		end,
+		{ self, target },
+		"DUNGEON_INSPECT");
+		LR_Watier:RegisterTimeout(3,function(self,me,target) 
+		
+		end,
+		{ self, target },
+		"RAID_INSPECT");
+		LR_Waiter:RegisterTimeout(5,function(self,me,target)
+
+		end,
+		{ self, target },
+		"BATTLEGROUND_INSPECT");
+		LR_Waiter:RegisterTimeout(7,function(self,me,target)
+
+		end,
+		{ self, target },
+		"2V2_INSPECT");
+		LR_Waiter:RegisterTimeout(9,function(self,me,target)
+
+		end,
+		{ self, target },
+		"3V3_INSPECT");
+	end,
+	InspectPending = false,
+	InspectTarget = ""
 }
 
 LiveRoster_Waiter = {
