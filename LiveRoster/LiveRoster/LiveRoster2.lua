@@ -38,36 +38,38 @@ LR_SETMETATABLES = function(item,classes)
 end
 LR_ISVALIDDATE = function(str)
 	local sanitizedStr,_ = gsub(str,"%D","/");
-	local d1, d2, d3 = strmatch(sanitizedStr,"(%d+)/(%d+)/(%d+)");
-	d1, d2, d3 = tonumber(d1), tonumber(d2), tonumber(d3);
-	local year,month,day = 0,0,0;
-	if d1 > 1000 then 
-		year = d1;
-	elseif d2 > 1000 then
-		year = d2;
-	else
-		year = d3;
-	end
-	if d < 0 or d > 31 or m < 0 or m > 12 or y < 0 then
-    -- Cases that don't make sense
-		return false,nil
-	elseif m == 4 or m == 6 or m == 9 or m == 11 then 
-		-- Apr, Jun, Sep, Nov can have at most 30 days
-		return d <= 30
-	elseif m == 2 then
-		-- Feb
-		if y%400 == 0 or (y%100 ~= 0 and y%4 == 0) then
-			-- if leap year, days can be at most 29
-			return d <= 29
-		else
-			-- else 28 days is the max
-			return d <= 28
+	local m, d, y = strmatch(sanitizedStr,"(%a+) (%d+), (%d+)");
+	if not not m and not not d and not not y then
+		if y < 2004 then y = y + 2000; end
+		local months = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
+		for idx,val in ipairs(months) do
+			if m == val then m = idx; break; end
 		end
-	else 
-		-- all other months can have at most 31 days
-		return d <= 31
+		return true, time({ year = y, month = m, day = d, hour = 0 });
+	else
+		return false, nil;
 	end
 end
+LR_ONUPDATE = function(self,elapsed)
+	local totalTime = LR_Waiter.TotalTime + elapsed;
+	LR_Waiter.TotalTime = totalTime;
+	local timeoutFunctions = LR_Waiter.TimeoutFunctions;
+	for k,v in pairs(timeoutFunctions) do
+		if totalTime >= v.ExecuteTime then 
+			v:Execute();
+			LR_Waiter.TimeoutFunctions[k] = nil;
+		end
+	end
+	timeoutFunctions = nil;
+	local intervalFuntions = LR_Waiter.IntervalFunctions;
+	for k,v in pairs(intervalFunctions) do
+		if totalTime >= v.ExecuteTime then 
+			v:Execute();
+			LR_Waiter.IntervalFunctions[k] = v.ExecuteTime + v.Interval;
+		end
+	end
+end
+
 function LiveRoster.addFunctions(self)
 
 	self.TrySaveRosterItem = function(self,collectionName,item) -- Attempts to save the roster item.  It will return true if the item successfully saves.  It will return false if the item does not save.  If the item fails to save because the record is out of date, then the newer record will be returned so it can be sent back to the source.
@@ -244,38 +246,6 @@ function LiveRoster.addFunctions(self)
 		end
 	end
 end
-
-function LiveRoster.RegisterEvents(self)
-	local frame = CreateFrame('LiveRosterFrame_EMPTY');
-	frame:RegisterEvent("GROUP_ROSTER_UPDATE");
-	frame:RegisterEvent("PLAYER_REGEN_DISABLED");
-	frame:RegisterEvent("PLAYER_REGEN_ENABLED");
-	frame:RegisterEvent("CHAT_MSG_ADDON")
-	frame:SetScript("OnEvent", function(self, event, ...)
-		if event == "PLAYER_REGEN_ENABLED" then
-			LiRos.InCombat = false;
-			LiRos:HandleCombatEnd();
-			LiRos:ProcessPendingMessages();
-		elseif event == "PLAYER_REGEN_DISABLED" then
-			LiRos.InCombat = true;
-			LiRos:HandleCombatStart();
-		elseif event == "CHAT_MSG_ADDON" then 
-			local message = select(2,...);
-			local channel = select(3,...);
-			local sender = select(4,...);
-			local messageKey = string.sub(message,1,1);
-			message = string.sub(message,2);
-			if not not LiRos.CommunicationEnabled then
-				LiRos:HandleMessage(messageKey,sender,message,channel);
-			else
-				LiRos:AddToPendingMessages(messageKey,sender,message,channel);
-			end
-		elseif event == "GROUP_ROSTER_UPDATE"
-			LiRos:BuildRaidRoster();
-		end
-	end)
-end
-
 
 LiveRoster = {
 	New = function(self,savedSelf)
@@ -576,8 +546,25 @@ LiveRoster_RaidProgress = {
 	AOTC = false,
 	CE = false	
 }
-LiveRoster_CharacterDungeonProgress = {}
-LiveRoster_CharacterBattlegroundProgress = {}
+LiveRoster_CharacterDungeonProgress = {
+	New = function(self,dungeon,values)
+		local me = values or {};
+		LR_SETMETATABLES(me, { LiveRoster_CharacterDungeonProgress });
+		me.Dungeon = dungeon;
+	end
+	Dungeon = "NoName",
+	HighestKeystone = 0
+}
+
+LiveRoster_CharacterBattlegroundProgress = {
+	New = function(self,battleground,values)
+		local me = values or {};
+		LR_SETMETATABLES(me, { LIveRoster_CharacterBattlegroundProgress })
+		me.Battleground = battleground;
+	end
+	Battleground = "NoName",
+
+}
 LiveRoster_CharacterArenaProgress = {}
 
 LiveRoster_Communication = {
@@ -807,13 +794,160 @@ LiveRoster_InboundMessage = {
 	end
 }
 
+LiveRoster_Events = {
+	New = function(self,savedSelf)
+		local me = {};
+		LR_SETMETATABLES(me, { LiveRoster_Events });
+		return me;
+	end
+	OnEvent = function(self,event,...)
+		local self.EventHandlers = handlers;
+		for k,v in pairs(handlers) do
+			if event == k then v(...);
+		end
+	end
+	RegisterEvents = function(self)
+		local self.EventHandlers = handlers;
+		local myFrame = CreateFrame("LR_EVENTFRAME");
+		for k,v in pairs(handlers) do
+			myFrame:RegisterEvent(k);
+		end
+	end
+	EventHandlers = {
+		PLAYER_REGEN_ENABLED = function(eventArgs)
+			LR.InCombat = false;
+			LR_Communication:HandlePendingMessages();
+		end,
+		PLAYER_REGEN_DISABLED = function(eventArgs)
+			LR.InCombat = true;
+		end,
+		CHAT_MSG_ADDON = function(eventArgs)
+			local message = select(2,eventArgs);
+			local channel = select(3,eventArgs);
+			local sender = select (4,eventArgs);
+			local messageKey = strsub(message,1,1);
+			message = strsub(message,2);
+			if not not LR.InCombat then 
+				LR_Communication:HandleMessage(messageKey,sender,message,channel);
+			else
+				LR_Communication:AddToPendingMessages(messageKey,sender,message,channel);
+			end
+		end,
+		GROUP_ROSTER_UPDATE = function(eventArgs)
+			LR_Roster:BuildGroupRoster();
+			if IsInGroup() then
+				LR_Inspector:TryBeginGroupInspection();
+			else
+				LR_Inspector:EndGroupInspection();
+			end
+		end,
+		INSPECT_READY = function(eventArgs)
+			
+		end,
+
+	}
+}
+
+LiveRoster_Inspector = {
+	New = function(self)
+		local me = {};
+		LR_SETMETATABLES(me, { LiveRoster_Inspector });
+		return me;
+	end
+	FindNextGroupMember = function(self,startIndex)
+		startIndex = startIndex or 0;
+		for idx,val in ipairs(LR_Roster.GroupRoster) do
+			if idx >= startIndex then
+				local inspection = self.InspectionHistory[val.FullName];
+				if LR.HasAddon(val.FullName) and (not inspection or inspection.Timestamp < (time() - 1800)) then
+					return val.FullName, idx;
+				end
+			end
+		end
+		return nil,0;
+	end
+	TryBeginGroupInspection = function(self)
+		if not self.InspectionRunning then 
+			self:BeginGroupInspection();
+		end
+	end
+	EndGroupInspection = function(self)
+		self.InspectionRunning = false;
+	end
+	BeginGroupInspection = function(self)
+		self.InspectionRunning = true;
+		local inspectTarget, startIndex = self:FindNextGroupMember(0);
+		local attempts = 0;
+		while not not inpsectTarget do
+			while not CanInspect(inspectTarget,false) do
+				if attempts < 10 then
+					attempts = attempts + 1;
+				else
+					inspectTarget,startIndex = self:FindNextGroupMember(startIndex + 1);
+					attempts = 0;
+				end
+			end
+			attempts = 0;
+			self:BeginInspectPlayer(inspectTarget);
+		end
+	end
+}
+
+LiveRoster_Waiter = {
+	New = function(self)
+		local me = {};
+		LR_SETMETATABLES(me, { LiveRoster_Waiter });
+		me.TotalTime = 0;
+		me.__FRAME = CreateFrame("LiveRoster_WaitFrame");
+		me.__FRAME:SetScript("OnUpdate",LR_ONUPDATE);
+		return me;
+	end
+	__FRAME = {}
+	TotalTime = 0;
+	RegisterTimeout = function(self,seconds,callback,callbackArgs,key)
+		self.TimeoutFunctions[key] = {
+			Exeecute = function(self)
+				self.Callback(select(1,self.CallbackArgs));
+			end,
+			Key = key,
+			Callback = callback,
+			CallbackArgs = callbackArgs,
+			ExecuteTime = self.TimeElapsed + seconds
+		}
+	end
+	RegisterInterval = function(self,seconds,callback,callbackArgs,key)
+		self.IntervalFunctions[key] = {
+			Exeecute = function(self)
+				self.Callback(select(1,self.CallbackArgs));
+			end,
+			Key = key,
+			Callback = callback,
+			CallbackArgs = callbackArgs,
+			ExecuteTime = self.TimeElapsed + seconds,
+			ExecuteInterval = seconds
+		}
+	end
+	IntervalFunctions = {};
+	TimeoutFunctions = {};
+	RemoveTimeout = function(self,key)
+		self.TimeoutFunctions[key] = nil;
+	end
+	RemoveInterval = function(self,key)
+		self.IntervalFunctions[key] = nil;
+	end
+}
+
 LR = LiveRoster:New(LR or nil); -- Manages versioning and addon settings.
 LR_Logger = LiveRoster_Logger:New(); -- Manages logging messages to user and error handling.
-LR_Communication = LiveRoster_Communiction:New(LR_Communication or nil); -- Manages addon communication.
+LR_Communication = LiveRoster_Communiction:New(); -- Manages addon communication.
 LR_Roster = LiveRoster_Roster:New(LR_Roster or nil); -- Manages roster information and storing data.
-LR_Classes = LiveRoster_ClassCollection:New(LR_Classes or nil); -- Library of class, role, and spec information.
-LR_Dungeons = LiveRoster_DungeonCollection:New(LR_Dungeons or nil); -- Library of dungeons.
-LR_Raids = LiveRoster_RaidsCollection:New(LR_Raids or nil); -- Library of raids.
-LR_Battlegrounds = LiveRoster_Battlegrounds:New(LR_Battlegrounds or nil); -- Library of Battlegrounds.
-LR_Arenas = LiveRoster_Arenas:New(LR_Arenas or nil); -- Library of Arenas.
-LR_Events = LiveRoster_Events:new(LR_Events or nil); -- Manages event-driven addon behavior.
+LR_Classes = LiveRoster_ClassCollection:New(); -- Library of class, role, and spec information.
+LR_Dungeons = LiveRoster_DungeonCollection:New(); -- Library of dungeons.
+LR_Raids = LiveRoster_RaidsCollection:New(); -- Library of raids.
+LR_Battlegrounds = LiveRoster_BattlegroundCollections:New(); -- Library of Battlegrounds.
+LR_Arenas = LiveRoster_ArenaCollection:New(); -- Library of Arenas.
+LR_Events = LiveRoster_Events:New(); -- Manages event-driven addon behavior.
+LR_Inspector = LiveRoster_Inspector:New(); -- Handles inspection of nearby players.
+LR_Waiter = LiveRoster_Waiter:New() -- Handles wait and delay timers.
+
+LR_Events:RegisterEvents();
