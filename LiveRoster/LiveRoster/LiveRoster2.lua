@@ -43,7 +43,11 @@ LR_ISVALIDDATE = function(str)
 		if y < 2004 then y = y + 2000; end
 		local months = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
 		for idx,val in ipairs(months) do
-			if m == val then m = idx; break; end
+			if m == val then -- if m == "January"
+				m = idx; break; 
+			elseif substr(val,1,3) == m then -- if m == "Jan"
+				m = idx; break;
+			end
 		end
 		return true, time({ year = y, month = m, day = d, hour = 0 });
 	else
@@ -857,12 +861,14 @@ LiveRoster_Inspector = {
 	end
 	FindNextGroupMember = function(self,startIndex)
 		startIndex = startIndex or 0;
-		for idx,val in ipairs(LR_Roster.GroupRoster) do
-			if idx >= startIndex then
-				local inspection = self.InspectionHistory[val.FullName];
-				if LR.HasAddon(val.FullName) and (not inspection or inspection.Timestamp < (time() - 1800)) then
-					return val.FullName, idx;
-				end
+		local roster = LR_Roster.GroupRoster;
+		if startIndex > #roster then startIndex = 0;
+		local rosterType = strlower(LR_Roster.GroupType);
+		for idx = startIndex,#roster do
+			local inspectName,inspectRealm = UnitName(rosterType..idx);
+			local inspection = self.InspectionHistory[inspectName];
+			if LR.HasAddon(inspectName..inspectRealm) and (not inspection or inspection.Timestamp < (time() - 1800)) then
+				return inspectName, idx, rosterType..idx;
 			end
 		end
 		return nil,0;
@@ -884,8 +890,8 @@ LiveRoster_Inspector = {
 				local inspectTarget = '';
 				local attempts = attempts or 0;
 				local startIndex = startIndex or 0;
-				inspectTarget, startIndex = me:FindNextGroupMember(startIndex);
-				if not CanInspect(inspectTarget, false) then
+				inspectTarget, startIndex, unitId = me:FindNextGroupMember(startIndex);
+				if not CanInspect(unitId, false) and CheckInteractDistance(unitId,1) then
 					if attempts >= 9 then
 						attempts = 0;
 						startIndex = startIndex + 1;
@@ -893,9 +899,10 @@ LiveRoster_Inspector = {
 						attempts = attempts + 1;
 					end
 				else
-					NotifyInspect(inspectTarget);
+					NotifyInspect(unitId);
 					me.InspectPending = true;
 					me.InspectTarget = inspectTarget;
+					me.InspectId = unitId;
 				end
 				LR_Waiter.IntervalFunctions[key].CallbackArgs = { me, key, startIndex, attempts };
 			end
@@ -905,34 +912,47 @@ LiveRoster_Inspector = {
 	end,
 	BeginInspection = function(self)
 		local target = self:InspectTarget;
-		LR_Waiter:RegisterTimeout(1,function(self,me,target)
-			
-		end,
-		{ self, target },
-		"DUNGEON_INSPECT");
-		LR_Watier:RegisterTimeout(3,function(self,me,target) 
-		
-		end,
-		{ self, target },
-		"RAID_INSPECT");
-		LR_Waiter:RegisterTimeout(5,function(self,me,target)
+		LR_Waiter:RegisterTimeout(1,function(self,me,inspectTarget,unitId)
+			if UnitName(unitId) == inspectTarget then
+				iLvl, equipment = me:InspectGear(inspectTarget,unitId);
 
+			me:EndInspection();
 		end,
 		{ self, target },
-		"BATTLEGROUND_INSPECT");
-		LR_Waiter:RegisterTimeout(7,function(self,me,target)
+		"GEAR_INSPECT");
+	end,
+	InspectGear = function(self,inspectTarget,unitId)
+		local mappedSlots = self.MappedSlots;
+		local equipment = {};
+		local mainHandLink = '';
+		local totalItemLevel = 0;
+		for idx,val in pairs(me.Slots) do
+			if not mappedSlots[val] then mappedSlots[val] = GetInventorySlotInfo(val); end
+			local slotId = mappedSlot[val];
+			local link = GetInventoryItemLink(inspectTarget,slotId);
+			itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice = GetItemInfo(link);
+			if val == "MainHandSlot" and not not itemSubType and (itemSubType == "Staves" or itemSubType == "Polearms" or itemSubType == "Guns" or itemSubType == "Crossbows" or itemSubType == "Bows" or substr(itemSubType,1,9) == "Two-Handed") then
+				mainHandLink = link;
+			elseif val == "MainHandSlot" then
+				mainHandLink = nil;
+			elseif val == "SecondaryHandSlot" and (not itemLevel or itemLevel == 0) and not not mainHandLink then
+				itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice = GetItemInfo(mainHandLink);
+			end
+			equipment[val] = { Name = name, Link = link, ItemLevel = itemLevel, Texture = itemTexture };
+			totalItemLevel = itemLevel + totalItemLevel;
+		end
+		local averageItemLevel = totalItemLevel / #mappedSlots;
+		return averageItemLevel, equipment;
+	end,
+	InspectTalents = function(self,inspectTarget)
+		local specId = GetInspectSpecialization();
+		local specIndex = GetSpecialization(1);
 
-		end,
-		{ self, target },
-		"2V2_INSPECT");
-		LR_Waiter:RegisterTimeout(9,function(self,me,target)
-
-		end,
-		{ self, target },
-		"3V3_INSPECT");
 	end,
 	InspectPending = false,
 	InspectTarget = ""
+	Slots = { "BackSlot","ChestSlot", "FeetSlot", "Finger0Slot", "Finger1Slot", "HandsSlot", "HeadSlot", "LegsSlot", "MainHandSlot","NeckSlot","SecondaryHandSlot","ShoulderSlot","Trinket0Slot","Trinket1Slot","WaistSlot","WristSlot" }
+	MappedSlots = {};
 }
 
 LiveRoster_Waiter = {
