@@ -304,7 +304,7 @@ LiveRoster_Roster = {
 	},
 	GuildRosterRecord = { -- Guild Roster Data that changes frequently.  The records are updated every hour while the player is not in combat, or when the player logs in.
 	},
-	SpecInformation = { -- Data about a character's spec-specific item level.  The records are updated every time the player logs in.
+	CharacterSpecializations = { -- Data about a character's spec-specific item level.  The records are updated every time the player logs in.
 	},
 	RaidProgress = { -- Data about a character's raid progress.  The records are updated every time the player logs in.  Addon users will broadcast a record update when they down a new raid boss.
 	},
@@ -499,10 +499,27 @@ LiveRoster_Specialization = {
 	Name = "",
 	Role = "",
 	PrimaryStat = "",
+	Originated = -1,
 	New = function(self,values)
 		local me = values or {};
 		LR_SETMETATABLES(me, { LiveRoster_Specialization });
+		me.Originated = time();
 		return me;
+	end
+	Save = function(self,name,class,index)
+		local specs = LR_Roster.CharacterSpecializations[name] or LiveRoster_CharacterSpecializations:New({FullName = name, Class = class});
+		local existingItem = specs["Specialization"..index];
+		if (existingItem.Originated < self.Originated) then
+			for k,v in pairs(self) do			
+				if type(v) ~= function then
+					existingItem[k] = v;
+				end
+			end	
+			specs["Specialization"..index] = existingItem;
+			LR_Roster.CharacterSpecializations[name] = specs;
+			return true, nil;
+		end
+		return false,existingItem;
 	end
 }
 LiveRoster_CharacterRaidProgress = {
@@ -914,8 +931,11 @@ LiveRoster_Inspector = {
 		local target = self:InspectTarget;
 		LR_Waiter:RegisterTimeout(1,function(self,me,inspectTarget,unitId)
 			if UnitName(unitId) == inspectTarget then
-				iLvl, equipment = me:InspectGear(inspectTarget,unitId);
-
+				local class = UnitClass(unitId);
+				local iLvl, equipment = me:InspectGear(inspectTarget,unitId);
+				local specIndex, specId, specName, specIcon, specRole, specStat = me:InspectTalents(inspectTarget);
+				LiveRoster_Specialization:New({ ItemLevel = iLvl, Name = specName, Role = specRole, PrimaryStat = specStat, Equipment = equipment }):Save(inspectTarget,class);
+			end
 			me:EndInspection();
 		end,
 		{ self, target },
@@ -945,9 +965,9 @@ LiveRoster_Inspector = {
 		return averageItemLevel, equipment;
 	end,
 	InspectTalents = function(self,inspectTarget)
-		local specId = GetInspectSpecialization();
 		local specIndex = GetSpecialization(1);
-
+		local id, name, _, icon, background, role, primaryStat = GetSpecializationInfo(specIndex, 1, 0, inspectTarget)
+		return specIndex, id, name, icon, role, primaryStat;
 	end,
 	InspectPending = false,
 	InspectTarget = ""
